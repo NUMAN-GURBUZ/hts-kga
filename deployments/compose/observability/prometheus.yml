@@ -1,0 +1,24 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "hts-simulator"
+    static_configs:
+      - targets: ["host.docker.internal:2112"]
+
+  - job_name: "hts-analysis-engine"
+    static_configs:
+      - targets: ["host.docker.internal:2113"]
+
+  - job_name: "hts-validation"
+    static_configs:
+      - targets: ["host.docker.internal:2114"]
+
+  - job_name: "hts-integrity"
+    static_configs:
+      - targets: ["host.docker.internal:2115"]
+
+  - job_name: "hts-gateway"
+    static_configs:
+      - targets: ["host.docker.internal:2116"]
