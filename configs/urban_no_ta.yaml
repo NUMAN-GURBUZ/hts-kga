@@ -1,0 +1,57 @@
+# configs/urban_no_ta.yaml   — Senaryo B: Kentsel + TA Yok
+run:
+  scenario: "B"
+  name: "Kentsel + TA Yok"
+  seed: 42
+
+morphology: "urban"
+
+area:
+  origin_lat: 38.6748
+  origin_lon: 39.2225
+  radius_km: 5
+
+simulation:
+  agents: 1000
+  duration_days: 30
+  tick_minutes: 5
+
+network:
+  sites_min: 100
+  sites_max: 150
+  rx_sensitivity_dbm: -110
+
+radio:
+  shadowing_sigma_db: 7
+  d_max_km: 5
+
+timing_advance:
+  enabled: false          # TA KAPALI — senaryo B
+
+analysis:
+  grid_resolution_m: 100
+  contour_levels: [0.50, 0.90, 0.95]
+  neighbor_max_count: 8
+  sample:
+    calibration_events: 5000
+    validation_events: 0
+
+calibration:
+  split_ratio: 0.80
+  lambda_min: 0.5
+  lambda_max: 3.0
+  target_coverage: 0.90
+  tolerance: 0.005
+  max_iterations: 12
+
+integrity:
+  max_velocity_kmh: 300
+  injection_rate: 0.02
+  rule_weights: {1: 0.2, 2: 0.2, 3: 0.2, 4: 0.2, 5: 0.2}
+
+privacy:
+  k_anonymity: 5
+  hmac_salt_env: "HMAC_SALT"
+
+api:
+  max_geometries_per_request: 500

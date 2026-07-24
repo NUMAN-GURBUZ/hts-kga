@@ -1,0 +1,59 @@
+# configs/urban_ta.yaml   — Senaryo A: Kentsel + TA Var
+# Bölüm L referans config'inden türetildi
+run:
+  scenario: "A"
+  name: "Kentsel + TA Var"
+  seed: 42                          # deterministik tekrarlanabilirlik (K10)
+
+morphology: "urban"                 # ADR-17: profil anahtarı — 8 alanı birden belirler
+
+area:                               # ADR-08
+  origin_lat: 38.6748               # senaryo merkez noktası (Elazığ — temsili)
+  origin_lon: 39.2225
+  radius_km: 5                      # kentsel profil varsayılanı
+
+simulation:
+  agents: 1000
+  duration_days: 30
+  tick_minutes: 5                   # 8.640 tick/ajan
+
+network:
+  sites_min: 100
+  sites_max: 150
+  rx_sensitivity_dbm: -110
+
+radio:
+  shadowing_sigma_db: 7             # σ_nominal ; σ_eff = λ · σ_nominal
+  d_max_km: 5                       # UMa/UMi geçerlilik sınırı (profil)
+
+timing_advance:
+  enabled: true
+  technology: "LTE"                 # 78.12 m/adım
+
+analysis:
+  grid_resolution_m: 100            # ADR-07
+  contour_levels: [0.50, 0.90, 0.95]
+  neighbor_max_count: 8             # ADR-03 ön-filtre üst sınırı
+  sample:                           # ADR-14
+    calibration_events: 5000
+    validation_events: 0            # 0 = 'V' kümesinin tamamı
+
+calibration:                        # ADR-02
+  split_ratio: 0.80                 # olay bazında C/V
+  lambda_min: 0.5
+  lambda_max: 3.0
+  target_coverage: 0.90
+  tolerance: 0.005
+  max_iterations: 12
+
+integrity:
+  max_velocity_kmh: 300
+  injection_rate: 0.02              # ADR-09
+  rule_weights: {1: 0.2, 2: 0.2, 3: 0.2, 4: 0.2, 5: 0.2}
+
+privacy:
+  k_anonymity: 5                    # yalnızca aggregate uçlar
+  hmac_salt_env: "HMAC_SALT"        # .env'den; config'de değil
+
+api:
+  max_geometries_per_request: 500   # ADR-13

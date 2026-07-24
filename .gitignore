@@ -1,0 +1,22 @@
+# Go
+bin/
+*.exe
+*.test
+*.out
+vendor/
+
+# Ortam — asla commit'lenme
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker geçici
+*.log

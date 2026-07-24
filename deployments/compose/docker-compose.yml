@@ -1,0 +1,125 @@
+# ==============================================================================
+# HTS-KGA — Docker Compose
+# T-E01-02 (Compose + healthcheck) · T-E01-03 (PostgreSQL/PostGIS/TimescaleDB)
+# T-E01-04 (Kafka KRaft + Redis 7)
+# ==============================================================================
+
+name: hts-kga
+
+services:
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PostgreSQL 15 + PostGIS 3.4 + TimescaleDB 2.x — T-E01-03
+  # timescaledb/timescaledb-ha içerir PostGIS'i de bundled olarak
+  # ─────────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: timescale/timescaledb-ha:pg15-latest
+    container_name: hts-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-hts_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hts_dev_password_2024}
+      POSTGRES_DB:       ${POSTGRES_DB:-hts_kga}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/home/postgres/pgdata/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Apache Kafka — KRaft modu (Zookeeper yok), 4 partition kapasiteli
+  # T-E01-04
+  # ─────────────────────────────────────────────────────────────────────────────
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: hts-kafka
+    restart: unless-stopped
+    environment:
+      # KRaft zorunlu değişkenleri
+      KAFKA_NODE_ID:                          1
+      KAFKA_PROCESS_ROLES:                    broker,controller
+      KAFKA_LISTENERS:                        PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS:             PLAINTEXT://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:   PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES:        CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS:         1@localhost:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME:       PLAINTEXT
+      # Performans / güvenilirlik
+      KAFKA_LOG_RETENTION_HOURS:              168       # 7 gün — simülasyon süresi + marj
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE:        "false"   # topic'ler make seed-kafka ile oluşturulur
+      KAFKA_NUM_PARTITIONS:                   4
+      KAFKA_DEFAULT_REPLICATION_FACTOR:       1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR:    1
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Redis 7 — hücre envanteri önbelleği (T-E01-04, T-E01-09)
+  # ─────────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: hts-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Prometheus + Grafana — OTel metrik toplama (T-E09; Sprint 0'da stub)
+  # ─────────────────────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v3.4.1
+    container_name: hts-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana:11.6.1
+    container_name: hts-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+  kafka_data:
+  grafana_data:
