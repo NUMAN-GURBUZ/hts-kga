@@ -61,6 +61,15 @@ func (g *Grid) Center(a geo.Axial) geo.Point { return g.hex.Center(a) }
 // Corners, hücrenin altı köşesidir (örtüşme oranı hesabı için).
 func (g *Grid) Corners(a geo.Axial) []geo.Point { return g.hex.Corners(a) }
 
+// Polygonize, hücre kümesinin sınırını MULTIPOLYGON'a çevirir (T-E03-11).
+//
+// Izgaranın kendi altıgen tanımıyla yapılması zorunludur: köşe kimlikleri
+// çözünürlüğe bağlıdır, başka bir ızgarayla üretilen kümede halkalar
+// birleşmezdi.
+func (g *Grid) Polygonize(cells []geo.Axial) (geometry.MultiPolygon, error) {
+	return geometry.Polygonize(cells, g.hex)
+}
+
 // Region, sektör dilimini kaplayan hücreleri döndürür.
 //
 // Bir hücre, **merkezi** dilim içindeyse sonuca dâhildir. Kenar hücrelerin
