@@ -79,6 +79,10 @@ type Shape struct {
 //
 // levels, senaryo config'inin `analysis.contour_levels` değeridir; sıra
 // önemsizdir, çıktı daima B0, B1 ve ardından artan güven seviyeleridir.
+//
+// rec'in yalnızca EventID ve CellID alanları okunur: TA, kütleyi (res)
+// üretirken çoktan işlenmiştir ve `ta_used` oradan gelir. Taban çizgileri ise
+// TA'yı hiç görmez (baseline paketi).
 func Shapes(rec Record, res Result, inv *params.Inventory, grid *density.Grid, levels []float64) ([]Shape, error) {
 	if inv == nil || grid == nil {
 		return nil, fmt.Errorf("tahmin üretimi: envanter ve ızgara zorunlu")
