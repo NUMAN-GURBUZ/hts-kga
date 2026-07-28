@@ -70,10 +70,11 @@ type Cell struct {
 //
 // Değişmezdir; eşzamanlı kullanımda güvenlidir.
 type Inventory struct {
-	cells    []Cell
-	index    map[uuid.UUID]int
-	maxRMaxM float64
-	origin   geo.WGS84
+	cells     []Cell
+	index     map[uuid.UUID]int
+	maxRMaxM  float64
+	origin    geo.WGS84
+	projector *geo.Projector
 }
 
 // CellSource, envanterin okunacağı kaynaktır.
@@ -118,9 +119,10 @@ func build(raw []redis.CellParams, projector *geo.Projector) (*Inventory, error)
 	}
 
 	inv := &Inventory{
-		cells:  make([]Cell, 0, len(raw)),
-		index:  make(map[uuid.UUID]int, len(raw)),
-		origin: projector.Origin(),
+		cells:     make([]Cell, 0, len(raw)),
+		index:     make(map[uuid.UUID]int, len(raw)),
+		origin:    projector.Origin(),
+		projector: projector,
 	}
 
 	for i, p := range raw {
@@ -195,6 +197,14 @@ func (inv *Inventory) MaxRMaxM() float64 { return inv.maxRMaxM }
 
 // Origin, ENU başlangıcını döndürür.
 func (inv *Inventory) Origin() geo.WGS84 { return inv.origin }
+
+// Projector, envanterin ENU izdüşümüdür.
+//
+// Direk konumları bu izdüşümle ENU'ya taşındı; üretilen geometri de **aynı**
+// izdüşümle WGS84'e döndürülmelidir. İkinci bir izdüşüm kurulsaydı (aynı
+// başlangıçla bile) sabitlerdeki en küçük fark, saklanan geometriyi envanterle
+// tutarsız yapardı.
+func (inv *Inventory) Projector() *geo.Projector { return inv.projector }
 
 // Cell, kimliğe göre sektörü döndürür.
 func (inv *Inventory) Cell(id uuid.UUID) (Cell, bool) {
