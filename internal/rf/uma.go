@@ -7,7 +7,7 @@
 // Kentsel makro hücre: anten çatı seviyesinin üzerinde (h_BS = 25 m nominal),
 // kapsama birkaç kilometre. Projede kentsel profilin varsayılan modelidir
 // (ADR-17: urban → UMa).
-package radio
+package rf
 
 import (
 	"math"

@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -93,6 +94,63 @@ func (c *Client) BulkLoadSites(ctx context.Context, runID uuid.UUID, sites []Sit
 		return fmt.Errorf("redis site GEO yüklemesi başarısız (%d site): %w", len(sites), err)
 	}
 	return nil
+}
+
+// ScanCells, koşuya ait tüm hücre parametrelerini okur (T-E03-02).
+//
+// Analiz motoru envanterin tamamını koşu başında belleğe alır: ~110 site ×
+// 3 sektör ≈ 330 kayıt, birkaç yüz kilobayt. ADR-03'ün komşu ön-filtresi için
+// mekânsal bir Redis indeksi kurmaya gerek yoktur — bu boyutta doğrusal
+// tarama, ağ gidiş-dönüşünden ucuzdur.
+//
+// Sonuç cell_id'ye göre sıralı döner. SCAN'in dönüş sırası garantili
+// olmadığından bu sıralama K10 için zorunludur: envanterin bellek düzeni
+// koşudan koşuya değişirse kayan nokta toplama sırası da değişebilir.
+func (c *Client) ScanCells(ctx context.Context, runID uuid.UUID) ([]CellParams, error) {
+	if runID == uuid.Nil {
+		return nil, fmt.Errorf("redis hücre taraması: run_id boş (ADR-05)")
+	}
+	pattern := fmt.Sprintf("hts:%s:cell:*", runID)
+
+	var keys []string
+	var cursor uint64
+	for {
+		batch, next, err := c.rdb.Scan(ctx, cursor, pattern, 200).Result()
+		if err != nil {
+			return nil, fmt.Errorf("redis hücre taraması başarısız: %w", err)
+		}
+		keys = append(keys, batch...)
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("redis hücre taraması: koşu %s için hücre yok", runID)
+	}
+
+	values, err := c.rdb.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redis hücre okuma başarısız (%d anahtar): %w", len(keys), err)
+	}
+
+	cells := make([]CellParams, 0, len(values))
+	for i, v := range values {
+		raw, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("redis hücre okuma: %s beklenmeyen tipte (%T)", keys[i], v)
+		}
+		var cell CellParams
+		if err := json.Unmarshal([]byte(raw), &cell); err != nil {
+			return nil, fmt.Errorf("hücre unmarshal hatası (%s): %w", keys[i], err)
+		}
+		cells = append(cells, cell)
+	}
+
+	sort.Slice(cells, func(i, j int) bool {
+		return cells[i].CellID.String() < cells[j].CellID.String()
+	})
+	return cells, nil
 }
 
 // CountCells, koşuya ait Redis'teki hücre anahtarı sayısını döndürür (doğrulama).

@@ -45,6 +45,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/NUMAN-GURBUZ/hts-kga/internal/rf"
 	"github.com/NUMAN-GURBUZ/hts-kga/pkg/geo"
 )
 
@@ -92,7 +93,7 @@ type Source struct {
 	// ENU, sitenin yerel düzlem konumudur (metre).
 	ENU geo.Point
 	// Model, sitenin yayılım modelidir — cells.model_type'tan gelir.
-	Model PathLossModel
+	Model rf.PathLossModel
 }
 
 // Environment, bir site ile bir nokta arasındaki yayılım ortamının
@@ -117,7 +118,7 @@ type ShadowingField struct {
 // NewShadowingField, koşu tohumundan bir gölgeleme alanı oluşturur.
 //
 // Alan σ ve dekorelasyon mesafesi tutmaz: bunlar bağın modeline ve LOS
-// durumuna göre PathLossModel'den okunur (TR 38.901 Tablo 7.4.1-1 / 7.5-6).
+// durumuna göre rf.PathLossModel'den okunur (TR 38.901 Tablo 7.4.1-1 / 7.5-6).
 func NewShadowingField(seed int64, utHeightM float64) (*ShadowingField, error) {
 	if !isPositiveFinite(utHeightM) {
 		return nil, fmt.Errorf("gölgeleme alanı: h_UT pozitif ve sonlu olmalı (%g)", utHeightM)

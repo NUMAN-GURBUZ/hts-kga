@@ -59,7 +59,7 @@ func Build(runID uuid.UUID, scn *config.Scenario, proj *geo.Projector) (*Invento
 		return nil, err
 	}
 
-	if err := AssignRMax(cells, scn.Profile); err != nil {
+	if err := AssignRMax(cells, scn); err != nil {
 		return nil, err
 	}
 

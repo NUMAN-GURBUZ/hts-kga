@@ -10,7 +10,7 @@
 //
 // Kabul ölçütü (ADR-06): fark ≤ 10 dB.
 // Çıktı: docs/scientific/cross-validation-3gpp.md
-package radio
+package rf
 
 import (
 	"fmt"
@@ -38,7 +38,7 @@ const (
 var crossValDistancesM = []float64{100, 500, 1000, 2000}
 
 // crossValOutputPath, karşılaştırma tablosunun yazılacağı yol (ADR-06).
-const crossValOutputPath = "../../../docs/scientific/cross-validation-3gpp.md"
+const crossValOutputPath = "../../docs/scientific/cross-validation-3gpp.md"
 
 // ─── Referans modeller (yalnızca test) ───────────────────────────────────────
 

@@ -9,7 +9,7 @@
 // UMa/UMi'den farkı: model, ortalama bina yüksekliği (h) ve sokak genişliği (W)
 // gibi **çevresel** parametreler alır; bunlar senaryo config'inde tutulmaz,
 // standardın varsayılan kırsal değerleri kullanılır.
-package radio
+package rf
 
 import (
 	"math"

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/config"
+	"github.com/NUMAN-GURBUZ/hts-kga/internal/rf"
 	"github.com/NUMAN-GURBUZ/hts-kga/pkg/geo"
 )
 
@@ -15,6 +16,13 @@ const (
 	testBeamWidthDeg     = 65.0
 	testTiltDeg          = 6.0
 	testFreqMHz          = 2100
+
+	// urbanHBSm / ruralHBSm, ADR-17 profillerinin anten yükseklikleridir.
+	// Aynı sabitler internal/rf test dosyalarında da vardır; ADR-20
+	// taşımasından sonra iki paket test yardımcılarını paylaşamadığı için
+	// burada tekrarlanır.
+	urbanHBSm = 25.0
+	ruralHBSm = 45.0
 )
 
 // testSectorAzimuths, T-E02-04 kararı: sabit 0 / 120 / 240.
@@ -25,9 +33,9 @@ func buildSite(t *testing.T, key uint64, enu geo.Point, model config.Propagation
 	antHeightM, rMaxM float64) Site {
 	t.Helper()
 
-	m, err := ModelFor(model)
+	m, err := rf.ModelFor(model)
 	if err != nil {
-		t.Fatalf("ModelFor(%q): %v", model, err)
+		t.Fatalf("rf.ModelFor(%q): %v", model, err)
 	}
 
 	cells := make([]Cell, len(testSectorAzimuths))
@@ -60,11 +68,11 @@ func buildSelector(t *testing.T, sites ...Site) *Selector {
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
-	field, err := NewShadowingField(testSeed, UTHeightM)
+	field, err := NewShadowingField(testSeed, rf.UTHeightM)
 	if err != nil {
 		t.Fatalf("NewShadowingField: %v", err)
 	}
-	sel, err := NewSelector(net, field, testRxSensitivityDBm, UTHeightM)
+	sel, err := NewSelector(net, field, testRxSensitivityDBm, rf.UTHeightM)
 	if err != nil {
 		t.Fatalf("NewSelector: %v", err)
 	}
@@ -73,7 +81,7 @@ func buildSelector(t *testing.T, sites ...Site) *Selector {
 
 // TestNewNetwork_Validation, bozuk şebeke tanımlarının reddedildiğini sınar.
 func TestNewNetwork_Validation(t *testing.T) {
-	uma, _ := ModelFor(config.ModelUMa)
+	uma, _ := rf.ModelFor(config.ModelUMa)
 	valid := buildSite(t, 1, geo.Point{}, config.ModelUMa, urbanHBSm, 5000)
 
 	tests := []struct {
@@ -114,15 +122,15 @@ func TestNewSelector_Validation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewNetwork: %v", err)
 	}
-	field, _ := NewShadowingField(testSeed, UTHeightM)
+	field, _ := NewShadowingField(testSeed, rf.UTHeightM)
 
-	if _, err := NewSelector(nil, field, testRxSensitivityDBm, UTHeightM); err == nil {
+	if _, err := NewSelector(nil, field, testRxSensitivityDBm, rf.UTHeightM); err == nil {
 		t.Error("nil şebeke için hata bekleniyordu")
 	}
-	if _, err := NewSelector(net, nil, testRxSensitivityDBm, UTHeightM); err == nil {
+	if _, err := NewSelector(net, nil, testRxSensitivityDBm, rf.UTHeightM); err == nil {
 		t.Error("nil alan için hata bekleniyordu")
 	}
-	if _, err := NewSelector(net, field, 110, UTHeightM); err == nil {
+	if _, err := NewSelector(net, field, 110, rf.UTHeightM); err == nil {
 		t.Error("pozitif rx duyarlılığı için hata bekleniyordu")
 	}
 	if _, err := NewSelector(net, field, testRxSensitivityDBm, 0); err == nil {
@@ -251,7 +259,7 @@ func TestSelect_PrefilterMatchesBruteForce(t *testing.T) {
 	// Ön filtresiz referans: tüm siteleri tara
 	brute := func(p geo.Point) Serving {
 		best := Serving{RxDBm: math.Inf(-1)}
-		field, _ := NewShadowingField(testSeed, UTHeightM)
+		field, _ := NewShadowingField(testSeed, rf.UTHeightM)
 		for i := range sites {
 			s := sites[i]
 			dx, dy := p.X-s.ENU.X, p.Y-s.ENU.Y
@@ -261,11 +269,11 @@ func TestSelect_PrefilterMatchesBruteForce(t *testing.T) {
 				if d2D > c.RMaxM {
 					continue
 				}
-				link := Link{D2DM: d2D, HBSm: s.AntHeightM, HUTm: UTHeightM,
+				link := rf.Link{D2DM: d2D, HBSm: s.AntHeightM, HUTm: rf.UTHeightM,
 					FreqMHz: c.FreqMHz, LOS: env.LOS}
 				rx := c.EIRPdBm - s.Model.PathLossDB(link) -
-					AntennaAttenuationDB(BearingDeg(dx, dy)-c.AzimuthDeg,
-						ElevationDeg(s.AntHeightM-UTHeightM, d2D), c.BeamWidthDeg, c.TiltDeg) +
+					rf.AntennaAttenuationDB(rf.BearingDeg(dx, dy)-c.AzimuthDeg,
+						rf.ElevationDeg(s.AntHeightM-rf.UTHeightM, d2D), c.BeamWidthDeg, c.TiltDeg) +
 					env.ShadowingDB
 				if rx > best.RxDBm {
 					best = Serving{CellID: c.ID, SiteKey: s.Key, RxDBm: rx, DistanceM: d2D, LOS: env.LOS}
@@ -319,103 +327,6 @@ func TestSelector_Helpers(t *testing.T) {
 	}
 }
 
-// ─── Anten deseni ────────────────────────────────────────────────────────────
-
-// TestAntennaPattern_ReferenceValues, TR 38.901 Tablo 7.3-1 tanımını sınar.
-func TestAntennaPattern_ReferenceValues(t *testing.T) {
-	t.Run("hüzme merkezi sıfır zayıflama", func(t *testing.T) {
-		// Δφ = 0 ve elevation = tilt → her iki bileşen de 0
-		if got := AntennaAttenuationDB(0, testTiltDeg, testBeamWidthDeg, testTiltDeg); got != 0 {
-			t.Errorf("hüzme merkezinde zayıflama %g, beklenen 0", got)
-		}
-	})
-
-	t.Run("yarım hüzme genişliğinde 3 dB", func(t *testing.T) {
-		// φ = φ_3dB/2 → 12·(0.5)² = 3 dB (3 dB genişliği tanımı)
-		got := horizontalAttenuationDB(testBeamWidthDeg/2, testBeamWidthDeg)
-		if math.Abs(got-3) > 1e-12 {
-			t.Errorf("yarım hüzmede %g dB, beklenen 3 dB", got)
-		}
-	})
-
-	t.Run("ön-arka bastırma sınırı", func(t *testing.T) {
-		if got := horizontalAttenuationDB(180, testBeamWidthDeg); got != frontToBackDB {
-			t.Errorf("arka yönde %g dB, beklenen %g dB", got, frontToBackDB)
-		}
-	})
-
-	t.Run("toplam zayıflama A_max ile kırpılır", func(t *testing.T) {
-		got := AntennaAttenuationDB(180, 90, testBeamWidthDeg, testTiltDeg)
-		if got != frontToBackDB {
-			t.Errorf("toplam zayıflama %g dB, beklenen kırpma %g dB", got, frontToBackDB)
-		}
-	})
-
-	t.Run("zayıflama daima [0, A_max]", func(t *testing.T) {
-		for phi := -360.0; phi <= 360; phi += 7 {
-			for elev := -90.0; elev <= 90; elev += 7 {
-				got := AntennaAttenuationDB(phi, elev, testBeamWidthDeg, testTiltDeg)
-				if got < 0 || got > frontToBackDB {
-					t.Fatalf("A(%.0f, %.0f) = %g — [0, %g] dışında",
-						phi, elev, got, frontToBackDB)
-				}
-			}
-		}
-	})
-}
-
-// TestWrapAngleDeg, açı indirgemesini sınar.
-func TestWrapAngleDeg(t *testing.T) {
-	tests := []struct{ in, want float64 }{
-		{0, 0}, {90, 90}, {180, 180}, {181, -179},
-		{270, -90}, {350, -10}, {360, 0}, {-90, -90},
-		{-181, 179}, {-350, 10}, {720, 0}, {450, 90},
-	}
-	for _, tc := range tests {
-		if got := WrapAngleDeg(tc.in); math.Abs(got-tc.want) > 1e-9 {
-			t.Errorf("WrapAngleDeg(%g) = %g, beklenen %g", tc.in, got, tc.want)
-		}
-	}
-}
-
-// TestBearingDeg, ENU yön hesabını sınar (kuzeyden saat yönünde).
-func TestBearingDeg(t *testing.T) {
-	tests := []struct {
-		name   string
-		dx, dy float64
-		want   float64
-	}{
-		{"kuzey", 0, 100, 0},
-		{"doğu", 100, 0, 90},
-		{"güney", 0, -100, 180},
-		{"batı", -100, 0, -90},
-		{"kuzeydoğu", 100, 100, 45},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := BearingDeg(tc.dx, tc.dy); math.Abs(got-tc.want) > 1e-9 {
-				t.Errorf("BearingDeg(%g, %g) = %g, beklenen %g", tc.dx, tc.dy, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestElevationDeg, düşey açı hesabını sınar.
-func TestElevationDeg(t *testing.T) {
-	// 45° üçgen
-	if got := ElevationDeg(100, 100); math.Abs(got-45) > 1e-9 {
-		t.Errorf("ElevationDeg(100, 100) = %g, beklenen 45", got)
-	}
-	// Uzakta → sıfıra yaklaşır
-	if got := ElevationDeg(23.5, 100000); got > 0.02 {
-		t.Errorf("çok uzakta düşey açı %g, sıfıra yakın olmalı", got)
-	}
-	// Antenin tam altı
-	if got := ElevationDeg(23.5, 0); got != 90 {
-		t.Errorf("anten altında %g, beklenen 90", got)
-	}
-}
-
 // ─── Başarım ─────────────────────────────────────────────────────────────────
 
 // BenchmarkSelect, sıcak yolun tick başına maliyetini ölçer.
@@ -426,7 +337,7 @@ func BenchmarkSelect(b *testing.B) {
 	const siteCount = 109
 
 	sites := make([]Site, siteCount)
-	m, _ := ModelFor(config.ModelUMa)
+	m, _ := rf.ModelFor(config.ModelUMa)
 	for i := range sites {
 		angle := float64(i) * 2 * math.Pi / siteCount
 		radius := 400 + float64(i%10)*450
@@ -454,8 +365,8 @@ func BenchmarkSelect(b *testing.B) {
 	if err != nil {
 		b.Fatalf("NewNetwork: %v", err)
 	}
-	field, _ := NewShadowingField(testSeed, UTHeightM)
-	sel, err := NewSelector(net, field, testRxSensitivityDBm, UTHeightM)
+	field, _ := NewShadowingField(testSeed, rf.UTHeightM)
+	sel, err := NewSelector(net, field, testRxSensitivityDBm, rf.UTHeightM)
 	if err != nil {
 		b.Fatalf("NewSelector: %v", err)
 	}

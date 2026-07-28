@@ -1,4 +1,4 @@
-package radio
+package rf
 
 import (
 	"math"

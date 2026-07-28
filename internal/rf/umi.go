@@ -6,7 +6,7 @@
 // kapsama birkaç yüz metre. Projede varsayılan olarak seçilmez; kentsel profil
 // UMa kullanır (ADR-17). Senaryo YAML'ında `network.propagation_model: "UMi"`
 // ile açıkça istenebilir ve yoğun kentsel katman çalışmalarına açıktır.
-package radio
+package rf
 
 import (
 	"math"
