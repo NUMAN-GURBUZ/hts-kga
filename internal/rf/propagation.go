@@ -10,7 +10,7 @@
 // ajan veya envanter tiplerini tanımaz. Girdi Link, çıktı dB'dir. Sıcak yolda
 // tick başına milyonlarca kez çağrılacağı için hiçbir fonksiyon ayırma
 // (allocation) yapmaz.
-package radio
+package rf
 
 import (
 	"fmt"

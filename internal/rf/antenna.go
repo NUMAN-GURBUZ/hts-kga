@@ -6,7 +6,7 @@
 // best-server keyfî seçim yapardı — sektörlü şebeke sektörsüze dönerdi.
 //
 // Desen, sektörleri ayıran tek fiziksel unsurdur.
-package radio
+package rf
 
 import "math"
 

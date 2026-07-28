@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/config"
+	"github.com/NUMAN-GURBUZ/hts-kga/internal/rf"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/simulator/inventory"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/simulator/radio"
 	"github.com/NUMAN-GURBUZ/hts-kga/pkg/geo"
@@ -49,9 +50,9 @@ func buildSelector(t *testing.T, scn *config.Scenario) *radio.Selector {
 	bySite := make(map[uuid.UUID]*radio.Site, inv.SiteCount())
 	order := make([]uuid.UUID, 0, inv.SiteCount())
 
-	model, err := radio.ModelFor(scn.Profile.PropagationModel)
+	model, err := rf.ModelFor(scn.Profile.PropagationModel)
 	if err != nil {
-		t.Fatalf("radio.ModelFor: %v", err)
+		t.Fatalf("rf.ModelFor: %v", err)
 	}
 
 	siteENU := make(map[uuid.UUID]geo.Point, inv.SiteCount())
@@ -93,11 +94,11 @@ func buildSelector(t *testing.T, scn *config.Scenario) *radio.Selector {
 	if err != nil {
 		t.Fatalf("radio.NewNetwork: %v", err)
 	}
-	field, err := radio.NewShadowingField(scn.Run.Seed, radio.UTHeightM)
+	field, err := radio.NewShadowingField(scn.Run.Seed, rf.UTHeightM)
 	if err != nil {
 		t.Fatalf("radio.NewShadowingField: %v", err)
 	}
-	sel, err := radio.NewSelector(net, field, scn.Network.RxSensitivityDBm, radio.UTHeightM)
+	sel, err := radio.NewSelector(net, field, scn.Network.RxSensitivityDBm, rf.UTHeightM)
 	if err != nil {
 		t.Fatalf("radio.NewSelector: %v", err)
 	}

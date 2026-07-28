@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/NUMAN-GURBUZ/hts-kga/internal/rf"
 	"github.com/NUMAN-GURBUZ/hts-kga/pkg/geo"
 )
 
@@ -192,8 +193,8 @@ func (s *Selector) Select(p geo.Point) Serving {
 		// Ortam site başına BİR KEZ çözülür ve üç sektöre paylaştırılır.
 		env := s.field.EnvironmentAt(site.Source, p)
 
-		bearing := BearingDeg(dx, dy)
-		elevation := ElevationDeg(site.AntHeightM-s.utHeightM, d2D)
+		bearing := rf.BearingDeg(dx, dy)
+		elevation := rf.ElevationDeg(site.AntHeightM-s.utHeightM, d2D)
 
 		for j := range site.Cells {
 			c := &site.Cells[j]
@@ -201,7 +202,7 @@ func (s *Selector) Select(p geo.Point) Serving {
 				continue
 			}
 
-			link := Link{
+			link := rf.Link{
 				D2DM:    d2D,
 				HBSm:    site.AntHeightM,
 				HUTm:    s.utHeightM,
@@ -210,7 +211,7 @@ func (s *Selector) Select(p geo.Point) Serving {
 			}
 
 			pathLoss := site.Model.PathLossDB(link)
-			beamLoss := AntennaAttenuationDB(
+			beamLoss := rf.AntennaAttenuationDB(
 				bearing-c.AzimuthDeg, elevation, c.BeamWidthDeg, c.TiltDeg)
 
 			rx := c.EIRPdBm - pathLoss - beamLoss + env.ShadowingDB
@@ -243,4 +244,13 @@ func (s *Selector) MaxRxDBm(p geo.Point) float64 {
 // IsCovered, verilen noktanın kapsama içinde olup olmadığını bildirir.
 func (s *Selector) IsCovered(p geo.Point) bool {
 	return s.Select(p).Covered
+}
+
+// isPositiveFinite, değerin pozitif ve sonlu olup olmadığını bildirir.
+//
+// Aynı yardımcı internal/rf içinde de vardır; ADR-20 taşımasından sonra bu
+// paketin dışa açılmamış bir yardımcıya bağımlı kalmaması için yerel kopya
+// tutulur (üç satır, davranışı tanım gereği tektir).
+func isPositiveFinite(v float64) bool {
+	return v > 0 && !math.IsInf(v, 0) && !math.IsNaN(v)
 }
