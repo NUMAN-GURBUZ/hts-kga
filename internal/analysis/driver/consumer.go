@@ -24,6 +24,15 @@ type Handler interface {
 	Handle(ctx context.Context, rec htswire.Record, result core.Result) error
 }
 
+// Flusher, tamponlu bir işleyicinin boşaltma yeteneğidir.
+//
+// Tüketici, offset commit'inden **önce** çağırır: tampon dolu kalıp offset
+// ilerleseydi, o andaki bir çökme yazılmamış tahminleri geri getirilemez
+// biçimde kaybederdi. İşleyici bu arayüzü uygulamıyorsa adım atlanır.
+type Flusher interface {
+	Flush(ctx context.Context) error
+}
+
 // HandlerFunc, işlev tipindeki Handler uyarlayıcısıdır.
 type HandlerFunc func(ctx context.Context, rec htswire.Record, result core.Result) error
 
@@ -142,6 +151,12 @@ func (c *Consumer) Run(ctx context.Context) error {
 				c.log.Error("kütle teslim edilemedi", "event_id", rec.EventID, "hata", err)
 			}
 		})
+
+		if flusher, ok := c.handler.(Flusher); ok {
+			if err := flusher.Flush(ctx); err != nil {
+				return fmt.Errorf("tüketici: tampon boşaltılamadı, offset ilerletilmiyor: %w", err)
+			}
+		}
 
 		if err := c.client.CommitUncommittedOffsets(ctx); err != nil {
 			return fmt.Errorf("tüketici: offset commit edilemedi: %w", err)
