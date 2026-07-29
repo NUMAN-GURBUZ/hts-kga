@@ -102,6 +102,18 @@ kafka-list: ## Topic listesini göster
 	@$(DC) exec -T kafka /opt/kafka/bin/kafka-topics.sh \
 		--bootstrap-server localhost:9092 --list
 
+
+# ==============================================================================
+# Simülasyon ve doğrulama koşuları — Sprint 5
+# ==============================================================================
+
+.PHONY: simulate
+
+CONFIG ?= configs/urban_ta.yaml
+
+simulate: ## Bir senaryo koşusu başlat (CONFIG=configs/<senaryo>.yaml)
+	HTS_CONFIG=$(CONFIG) $(GO) run ./cmd/simulator
+
 # ==============================================================================
 # Bütünlük ve izolasyon doğrulama — T-E01-12 / ADR-01, ADR-09
 # ==============================================================================
