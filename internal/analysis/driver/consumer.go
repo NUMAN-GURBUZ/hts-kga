@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -54,6 +55,8 @@ type Consumer struct {
 	handler Handler
 	sampler sampling.Policy
 	runID   uuid.UUID
+	idle    time.Duration
+	seen    time.Time
 	log     *slog.Logger
 
 	analyzed int64
@@ -89,6 +92,9 @@ type ConsumerConfig struct {
 	// bir mod seçmelidir — sessiz bir "hepsini işle" varsayımı, örnekleme
 	// kararını (ADR-14) kazara devre dışı bırakırdı.
 	Sampler sampling.Policy
+	// IdleTimeout, hiç kayıt gelmediğinde tüketicinin kendiliğinden duracağı
+	// süredir; 0 ise süresiz çalışır (toplu koşum için — T-E04-08).
+	IdleTimeout time.Duration
 	// Logger, isteğe bağlıdır; nil ise slog.Default kullanılır.
 	Logger *slog.Logger
 }
@@ -132,6 +138,8 @@ func NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 		handler: cfg.Handler,
 		sampler: cfg.Sampler,
 		runID:   cfg.RunID,
+		idle:    cfg.IdleTimeout,
+		seen:    time.Now(),
 		log:     log,
 	}, nil
 }
@@ -155,12 +163,28 @@ func (c *Consumer) Run(ctx context.Context) error {
 			return nil
 		}
 
-		fetches := c.client.PollFetches(ctx)
+		if c.idle > 0 && time.Since(c.seen) > c.idle {
+			c.log.Info("akış boşta, tüketici duruyor",
+				"boşta", c.idle, "işlenen", c.analyzed, "elenen", c.skipped)
+			return nil
+		}
+
+		pollCtx, cancel := pollContext(ctx, c.idle)
+		fetches := c.client.PollFetches(pollCtx)
+		cancel()
+
 		if errs := fetches.Errors(); len(errs) > 0 {
+			if errors.Is(errs[0].Err, context.DeadlineExceeded) && ctx.Err() == nil {
+				continue
+			}
 			if errors.Is(errs[0].Err, context.Canceled) {
 				return nil
 			}
 			return fmt.Errorf("tüketici: getirme hatası (%s): %w", errs[0].Topic, errs[0].Err)
+		}
+
+		if fetches.NumRecords() > 0 {
+			c.seen = time.Now()
 		}
 
 		var failed int
@@ -218,6 +242,14 @@ func (c *Consumer) Run(ctx context.Context) error {
 			c.log.Warn("bu partide işlenemeyen kayıt var", "adet", failed)
 		}
 	}
+}
+
+// pollContext, yoklama için süreli bir bağlam üretir (bkz. internal/persist).
+func pollContext(ctx context.Context, idle time.Duration) (context.Context, context.CancelFunc) {
+	if idle <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, idle)
 }
 
 // Stats, örnekleme sonrası işlenen ve elenen olay sayılarını döndürür.

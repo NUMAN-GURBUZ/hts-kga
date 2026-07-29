@@ -15,6 +15,7 @@
 //	HTS_RUN_ID      işlenecek koşunun kimliği (zorunlu — ADR-05)
 //	HTS_LAMBDA      kalibrasyon parametresi (varsayılan 1.0; S5'te λ* gelir)
 //	HTS_SAMPLE_MODE validation | calibration | full (varsayılan validation)
+//	HTS_IDLE_TIMEOUT akış boşta kalınca çıkış süresi (örn. "20s"); boşsa süresiz
 //	POSTGRES_*      bağlantı bilgileri
 //	KAFKA_BROKERS   virgülle ayrılmış broker listesi
 //	REDIS_ADDR      Redis adresi
@@ -157,14 +158,22 @@ func run() error {
 	}
 
 	// ─── Tüketici ────────────────────────────────────────────────────────────
+	var idle time.Duration
+	if v := os.Getenv("HTS_IDLE_TIMEOUT"); v != "" {
+		if idle, err = time.ParseDuration(v); err != nil {
+			return fmt.Errorf("HTS_IDLE_TIMEOUT geçersiz (%q): %w", v, err)
+		}
+	}
+
 	consumer, err := driver.NewConsumer(driver.ConsumerConfig{
-		Brokers: strings.Split(envOr("KAFKA_BROKERS", "localhost:9092"), ","),
-		Group:   consumerGroup,
-		Engine:  engine,
-		Handler: persister,
-		Sampler: sampler,
-		RunID:   runID,
-		Logger:  logger,
+		Brokers:     strings.Split(envOr("KAFKA_BROKERS", "localhost:9092"), ","),
+		IdleTimeout: idle,
+		Group:       consumerGroup,
+		Engine:      engine,
+		Handler:     persister,
+		Sampler:     sampler,
+		RunID:       runID,
+		Logger:      logger,
 	})
 	if err != nil {
 		return fmt.Errorf("tüketici kurulamadı: %w", err)

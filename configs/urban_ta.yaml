@@ -36,7 +36,7 @@ analysis:
   neighbor_max_count: 8             # ADR-03 ön-filtre üst sınırı
   sample:                           # ADR-14
     calibration_events: 5000
-    validation_events: 0            # 0 = 'V' kümesinin tamamı
+    validation_events: 5000    # ADR-14/ADR-26: yeni çözünürlükte maliyet dengesi
 
 calibration:                        # ADR-02
   split_ratio: 0.80                 # olay bazında C/V

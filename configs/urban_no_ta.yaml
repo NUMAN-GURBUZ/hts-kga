@@ -34,7 +34,7 @@ analysis:
   neighbor_max_count: 8
   sample:
     calibration_events: 5000
-    validation_events: 0
+    validation_events: 5000    # ADR-14/ADR-26: yeni çözünürlükte maliyet dengesi
 
 calibration:
   split_ratio: 0.80

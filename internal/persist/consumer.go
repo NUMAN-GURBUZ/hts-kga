@@ -32,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
@@ -64,18 +65,26 @@ type Config[T any] struct {
 	Write Writer[T]
 	// BatchRows, tampon eşiğidir; 0 ise varsayılan kullanılır.
 	BatchRows int
+	// IdleTimeout, hiç mesaj gelmediğinde tüketicinin kendiliğinden
+	// duracağı süredir; 0 ise süresiz çalışır.
+	//
+	// Toplu koşum (T-E04-08) için gereklidir: akış bittiğinde servisin
+	// kendiliğinden çıkması, betiği "ne zaman durdurayım" tahmininden
+	// kurtarır. Sürekli çalışan dağıtımlarda 0 bırakılır.
+	IdleTimeout time.Duration
 	// Logger, isteğe bağlıdır.
 	Logger *slog.Logger
 }
 
 // Consumer, bir topic'i veritabanına yazar.
 type Consumer[T any] struct {
-	client  *kgo.Client
-	cfg     Config[T]
-	log     *slog.Logger
-	batch   []T
-	written int64
-	failed  int64
+	client   *kgo.Client
+	cfg      Config[T]
+	log      *slog.Logger
+	batch    []T
+	written  int64
+	failed   int64
+	lastSeen time.Time
 }
 
 // New, tüketiciyi kurar ve topic'e abone olur.
@@ -113,10 +122,11 @@ func New[T any](cfg Config[T]) (*Consumer[T], error) {
 	}
 
 	return &Consumer[T]{
-		client: client,
-		cfg:    cfg,
-		log:    log,
-		batch:  make([]T, 0, cfg.BatchRows),
+		client:   client,
+		cfg:      cfg,
+		log:      log,
+		batch:    make([]T, 0, cfg.BatchRows),
+		lastSeen: time.Now(),
 	}, nil
 }
 
@@ -137,12 +147,30 @@ func (c *Consumer[T]) Run(ctx context.Context) error {
 			return c.flush(context.WithoutCancel(ctx))
 		}
 
-		fetches := c.client.PollFetches(ctx)
+		if c.cfg.IdleTimeout > 0 && time.Since(c.lastSeen) > c.cfg.IdleTimeout {
+			c.log.Info("akış boşta, tüketici duruyor",
+				"boşta", c.cfg.IdleTimeout, "yazılan", c.written)
+			return c.flush(context.WithoutCancel(ctx))
+		}
+
+		// Yoklama süresi sınırlanır ki boşta kalma denetimi çalışabilsin.
+		// `defer cancel()` kullanılmaz: döngü içinde birikir ve uzun ömürlü
+		// tüketicide sızıntı olurdu.
+		pollCtx, cancel := pollContext(ctx, c.cfg.IdleTimeout)
+		fetches := c.client.PollFetches(pollCtx)
+		cancel()
 		if errs := fetches.Errors(); len(errs) > 0 {
+			if errors.Is(errs[0].Err, context.DeadlineExceeded) && ctx.Err() == nil {
+				continue // boşta yoklama: döngü başındaki süre denetimine dön
+			}
 			if errors.Is(errs[0].Err, context.Canceled) {
 				return c.flush(context.WithoutCancel(ctx))
 			}
 			return fmt.Errorf("persister: getirme hatası (%s): %w", errs[0].Topic, errs[0].Err)
+		}
+
+		if fetches.NumRecords() > 0 {
+			c.lastSeen = time.Now()
 		}
 
 		fetches.EachRecord(func(msg *kgo.Record) {
@@ -165,6 +193,16 @@ func (c *Consumer[T]) Run(ctx context.Context) error {
 			return fmt.Errorf("persister: offset commit edilemedi: %w", err)
 		}
 	}
+}
+
+// pollContext, yoklama için süreli bir bağlam üretir.
+//
+// IdleTimeout sıfırsa bağlam olduğu gibi döner ve yoklama süresiz bekler.
+func pollContext(ctx context.Context, idle time.Duration) (context.Context, context.CancelFunc) {
+	if idle <= 0 {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, idle)
 }
 
 // flush, tamponu veritabanına yazar.
