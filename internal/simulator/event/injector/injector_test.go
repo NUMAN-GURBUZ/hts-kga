@@ -48,7 +48,7 @@ func testPair(cells []CellRef, agentID, tick int) event.Pair {
 			Time:         time.Date(2026, 1, 5, 12, 0, 0, 0, time.UTC),
 			PseudoMSISDN: "abc",
 			PseudoIMEI:   "def",
-			EventType:    event.EventCall,
+			EventType:    event.EventMOC,
 			CellID:       cells[3].ID,
 			TAValue:      &ta,
 			Scenario:     "A",
