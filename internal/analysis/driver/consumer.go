@@ -183,9 +183,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 			return fmt.Errorf("tüketici: getirme hatası (%s): %w", errs[0].Topic, errs[0].Err)
 		}
 
-		if fetches.NumRecords() > 0 {
-			c.seen = time.Now()
-		}
+		hadRecords := fetches.NumRecords() > 0
 
 		var failed int
 		fetches.EachRecord(func(msg *kgo.Record) {
@@ -240,6 +238,16 @@ func (c *Consumer) Run(ctx context.Context) error {
 		}
 		if failed > 0 {
 			c.log.Warn("bu partide işlenemeyen kayıt var", "adet", failed)
+		}
+
+		// Boşta sayacı parti **işlendikten sonra** sıfırlanır.
+		//
+		// Başta sıfırlansaydı, işleme süresi boşta süresi sayılırdı: kırsal
+		// TA'sız senaryoda tek bir parti ~20 sn sürüyor ve eşik 20 sn olduğu
+		// için tüketici, akışta 277.000 kayıt dururken kendini boşta sanıp
+		// çıkıyordu (senaryo D ilk koşumda 3.000 yerine 225 olay analiz etti).
+		if hadRecords {
+			c.seen = time.Now()
 		}
 	}
 }
