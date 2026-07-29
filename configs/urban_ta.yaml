@@ -31,7 +31,7 @@ timing_advance:
   technology: "LTE"                 # 78.12 m/adım
 
 analysis:
-  grid_resolution_m: 100            # ADR-07
+  grid_resolution_m: 50             # ADR-26: TA halkası 78,12 m — halka/adım 1,56
   contour_levels: [0.50, 0.90, 0.95]
   neighbor_max_count: 8             # ADR-03 ön-filtre üst sınırı
   sample:                           # ADR-14

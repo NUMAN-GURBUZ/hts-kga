@@ -29,7 +29,7 @@ timing_advance:
   enabled: false          # TA KAPALI — senaryo B
 
 analysis:
-  grid_resolution_m: 100
+  grid_resolution_m: 50             # ADR-26: TA halkası 78,12 m — halka/adım 1,56
   contour_levels: [0.50, 0.90, 0.95]
   neighbor_max_count: 8
   sample:

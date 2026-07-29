@@ -29,7 +29,7 @@ timing_advance:
   enabled: false          # TA KAPALI — senaryo D
 
 analysis:
-  grid_resolution_m: 250            # ADR-18/6: kırsalda ölçüm sonucu (100 m → 2 sa 54 dk/geçiş)
+  grid_resolution_m: 150            # ADR-26: kırsalda maliyet/parçalanma dengesi
   contour_levels: [0.50, 0.90, 0.95]
   neighbor_max_count: 8
   sample:

@@ -163,6 +163,7 @@ func run() error {
 		Engine:  engine,
 		Handler: persister,
 		Sampler: sampler,
+		RunID:   runID,
 		Logger:  logger,
 	})
 	if err != nil {
@@ -214,16 +215,18 @@ func buildSampler(scn *config.Scenario, status postgres.RunStatus) (sampling.Pol
 	}
 
 	cfg := sampling.Config{
-		Mode:         mode,
-		Seed:         scn.Run.Seed,
-		SplitRatio:   scn.Calibration.SplitRatio,
-		TargetEvents: scn.Analysis.Sample.CalibrationEvents,
+		Mode:             mode,
+		Seed:             scn.Run.Seed,
+		SplitRatio:       scn.Calibration.SplitRatio,
+		TargetEvents:     scn.Analysis.Sample.CalibrationEvents,
+		ValidationEvents: scn.Analysis.Sample.ValidationEvents,
 	}
 
-	if mode == sampling.ModeCalibration {
+	if mode == sampling.ModeCalibration ||
+		(mode == sampling.ModeValidation && cfg.ValidationEvents > 0) {
 		if status.PublishedEvents == nil {
 			return sampling.Policy{}, fmt.Errorf(
-				"kalibrasyon modu koşunun bitmiş olmasını gerektirir: " +
+				"örneklem sınırı koşunun bitmiş olmasını gerektirir: " +
 					"run_config.published_events boş (önce simülasyonu tamamlayın)")
 		}
 		cfg.ExpectedTotalEvents = int(*status.PublishedEvents)

@@ -86,6 +86,16 @@ type Config struct {
 	// TargetEvents, kalibrasyon modunda hedeflenen olay sayısıdır
 	// (analysis.sample.calibration_events, varsayılan 5.000).
 	TargetEvents int
+	// ValidationEvents, doğrulama modunda üst sınırdır
+	// (analysis.sample.validation_events); 0 ise 'V' kümesinin tamamı
+	// analiz edilir (ADR-14 varsayılanı).
+	//
+	// Sınır, ADR-14'ün "örneklem büyüklüğü config'de ayarlanabilir"
+	// hükmünün karşılığıdır: tam 'V' kümesi kırsal senaryoda saatler sürer
+	// ve ölçümün istatistiksel gücü çok daha küçük bir örneklemde de
+	// yeterlidir. Seyreltme kalibrasyondakiyle **aynı** karma ile yapılır,
+	// bu yüzden tekrarlanabilirdir (K10).
+	ValidationEvents int
 	// ExpectedTotalEvents, koşunun beklenen toplam olay sayısıdır.
 	//
 	// Akışta gerçek sayı önceden bilinemez; seyreltme oranı bu tahminden
@@ -107,6 +117,14 @@ func New(cfg Config) (Policy, error) {
 	}
 
 	p := Policy{mode: cfg.Mode, splitter: splitter, seed: cfg.Seed, keepRatio: 1}
+
+	if cfg.Mode == ModeValidation && cfg.ValidationEvents > 0 {
+		if cfg.ExpectedTotalEvents <= 0 {
+			return Policy{}, fmt.Errorf("örnekleme: 'V' sınırı için beklenen olay sayısı gerekli")
+		}
+		expectedV := float64(cfg.ExpectedTotalEvents) * (1 - cfg.SplitRatio)
+		p.keepRatio = math.Min(1, float64(cfg.ValidationEvents)/expectedV)
+	}
 
 	if cfg.Mode == ModeCalibration {
 		if cfg.TargetEvents <= 0 {
@@ -137,7 +155,13 @@ func (p Policy) Includes(eventID uuid.UUID) bool {
 		return true
 
 	case ModeValidation:
-		return p.splitter.Of(eventID) == split.Validation
+		if p.splitter.Of(eventID) != split.Validation {
+			return false
+		}
+		if p.keepRatio >= 1 {
+			return true
+		}
+		return p.thin(eventID) < p.keepRatio
 
 	case ModeCalibration:
 		if p.splitter.Of(eventID) != split.Calibration {

@@ -61,6 +61,14 @@ func (g *Grid) Center(a geo.Axial) geo.Point { return g.hex.Center(a) }
 // Corners, hücrenin altı köşesidir (örtüşme oranı hesabı için).
 func (g *Grid) Corners(a geo.Axial) []geo.Point { return g.hex.Corners(a) }
 
+// At, verilen ENU noktasını içeren hücreyi döndürür.
+//
+// Kapsama ölçümünün kısayoludur (T-E04-06): kontur, seçilen hücrelerin
+// birleşimi olduğu için "nokta kontur içinde mi" sorusu "noktanın hücresi
+// seçilenler arasında mı" sorusuna eşdeğerdir. Poligon üretmeden aynı cevabı
+// verir.
+func (g *Grid) At(p geo.Point) geo.Axial { return g.hex.At(p) }
+
 // Polygonize, hücre kümesinin sınırını MULTIPOLYGON'a çevirir (T-E03-11).
 //
 // Izgaranın kendi altıgen tanımıyla yapılması zorunludur: köşe kimlikleri
