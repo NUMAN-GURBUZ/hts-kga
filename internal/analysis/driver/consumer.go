@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/core"
@@ -52,10 +53,12 @@ type Consumer struct {
 	engine  *Engine
 	handler Handler
 	sampler sampling.Policy
+	runID   uuid.UUID
 	log     *slog.Logger
 
 	analyzed int64
 	skipped  int64
+	foreign  int64
 }
 
 // ConsumerConfig, tüketicinin kurulum parametreleridir.
@@ -68,6 +71,17 @@ type ConsumerConfig struct {
 	Engine *Engine
 	// Handler, üretilen kütleyi alır.
 	Handler Handler
+	// RunID, işlenecek koşudur (ADR-05).
+	//
+	// Topic koşular arasında paylaşılır ve geçmiş koşuların kayıtları
+	// silinmez (retention 7 gün). Başka bir koşunun kaydı bu koşunun
+	// envanterinde bulunmayan bir hücreye işaret eder ve kütle üretimi
+	// "hücre envanterde yok" diye düşer — sessiz bir hata değil, ama
+	// gürültülü ve yanlış: o kayıt bu servise ait değildir.
+	//
+	// Ayrıca sayaçları bozar: analyzed_events başka koşuların olaylarını da
+	// sayarsa bütünlük denetimi (ADR-23) tutmaz.
+	RunID uuid.UUID
 	// Sampler, hangi olayların işleneceğini belirler (ADR-14, ADR-24).
 	//
 	// Filtre kütle hesabından **önce** uygulanır: elenen olay için ne kütle
@@ -92,6 +106,8 @@ func NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 		return nil, fmt.Errorf("tüketici: işleyici zorunlu")
 	case !cfg.Sampler.Mode().Valid():
 		return nil, fmt.Errorf("tüketici: örnekleme politikası zorunlu (ADR-14)")
+	case cfg.RunID == uuid.Nil:
+		return nil, fmt.Errorf("tüketici: run_id zorunlu (ADR-05)")
 	}
 
 	client, err := kgo.NewClient(
@@ -115,6 +131,7 @@ func NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 		engine:  cfg.Engine,
 		handler: cfg.Handler,
 		sampler: cfg.Sampler,
+		runID:   cfg.RunID,
 		log:     log,
 	}, nil
 }
@@ -158,16 +175,24 @@ func (c *Consumer) Run(ctx context.Context) error {
 				return
 			}
 
+			if rec.RunID != c.runID {
+				c.foreign++
+				return
+			}
 			if !c.sampler.Includes(rec.EventID) {
 				c.skipped++
 				return
 			}
-			c.analyzed++
 
 			result, err := c.engine.Process(rec)
 			if err != nil {
+				// Enjeksiyon kural 1 (sahte hücre) envanterde olmayan bir
+				// cell_id yazar (ADR-09); o kayıt için kütle üretilemez ve
+				// bu **beklenen** bir durumdur. Sayaç artmaz: analyzed_events
+				// yalnızca gerçekten tahmin üretilen olayları saymalıdır,
+				// yoksa bütünlük denetimi (ADR-23) tutmaz.
 				failed++
-				c.log.Error("kütle üretilemedi, atlanıyor",
+				c.log.Warn("kütle üretilemedi, atlanıyor",
 					"event_id", rec.EventID, "cell_id", rec.CellID, "hata", err)
 				return
 			}
@@ -175,7 +200,9 @@ func (c *Consumer) Run(ctx context.Context) error {
 			if err := c.handler.Handle(msgCtx, rec, result); err != nil {
 				failed++
 				c.log.Error("kütle teslim edilemedi", "event_id", rec.EventID, "hata", err)
+				return
 			}
+			c.analyzed++
 		})
 
 		if flusher, ok := c.handler.(Flusher); ok {
@@ -201,6 +228,9 @@ func (c *Consumer) Run(ctx context.Context) error {
 func (c *Consumer) Stats() (analyzed, skipped int64) {
 	return c.analyzed, c.skipped
 }
+
+// Foreign, başka koşulara ait olduğu için atlanan kayıt sayısını döndürür.
+func (c *Consumer) Foreign() int64 { return c.foreign }
 
 // Close, tüketiciyi kapatır.
 func (c *Consumer) Close() {

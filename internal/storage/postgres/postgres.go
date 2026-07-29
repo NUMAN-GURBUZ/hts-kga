@@ -50,6 +50,18 @@ func (p *Pool) Close() { p.pool.Close() }
 // Ping, bağlantıyı denetler. health.Register ile /ready ucuna bağlanır.
 func (p *Pool) Ping(ctx context.Context) error { return p.pool.Ping(ctx) }
 
+// Querier, kendi SQL'ini taşıyan katmanlar için sorgu yüzeyidir.
+//
+// Bu paket normalde SQL'in tek sahibidir. İstisna plan BÖLÜM F'tir: metrik
+// şablonları (F.1–F.4) bilimsel iddianın parçasıdır ve plan onları
+// `internal/validation/metrics/` altında konumlandırır — sorgunun yanında
+// gerekçesi, toleransı ve testi durur. O katman sorguyu kendisi yazar, ama
+// bağlantı yönetimi burada kalır.
+//
+// Yazma yolları (`InsertCells`, `InsertEstimates`, …) bu istisnanın dışındadır
+// ve bu pakette tanımlı olmaya devam eder.
+func (p *Pool) Querier() *pgxpool.Pool { return p.pool }
+
 // GitSHA, çalışan ikilinin sürüm damgasını döndürür (ADR-05, run_config.git_sha).
 //
 // Derleme VCS bilgisi yoksa "unknown" döner — run_config.git_sha NOT NULL

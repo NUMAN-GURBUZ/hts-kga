@@ -319,6 +319,7 @@ func runPipeline(t *testing.T, configFile string) {
 		Engine:  engine,
 		Handler: persister,
 		Sampler: sampler,
+		RunID:   fx.runID,
 	})
 	if err != nil {
 		t.Fatalf("NewConsumer: %v", err)
