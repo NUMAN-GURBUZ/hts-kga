@@ -11,6 +11,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/core"
+	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/sampling"
 	"github.com/NUMAN-GURBUZ/hts-kga/pkg/htswire"
 	"github.com/NUMAN-GURBUZ/hts-kga/pkg/kafka"
 )
@@ -50,7 +51,11 @@ type Consumer struct {
 	client  *kgo.Client
 	engine  *Engine
 	handler Handler
+	sampler sampling.Policy
 	log     *slog.Logger
+
+	analyzed int64
+	skipped  int64
 }
 
 // ConsumerConfig, tüketicinin kurulum parametreleridir.
@@ -63,6 +68,13 @@ type ConsumerConfig struct {
 	Engine *Engine
 	// Handler, üretilen kütleyi alır.
 	Handler Handler
+	// Sampler, hangi olayların işleneceğini belirler (ADR-14, ADR-24).
+	//
+	// Filtre kütle hesabından **önce** uygulanır: elenen olay için ne kütle
+	// üretilir ne de satır yazılır. Sıfır değeri geçersizdir; çağıran açıkça
+	// bir mod seçmelidir — sessiz bir "hepsini işle" varsayımı, örnekleme
+	// kararını (ADR-14) kazara devre dışı bırakırdı.
+	Sampler sampling.Policy
 	// Logger, isteğe bağlıdır; nil ise slog.Default kullanılır.
 	Logger *slog.Logger
 }
@@ -78,6 +90,8 @@ func NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 		return nil, fmt.Errorf("tüketici: motor zorunlu")
 	case cfg.Handler == nil:
 		return nil, fmt.Errorf("tüketici: işleyici zorunlu")
+	case !cfg.Sampler.Mode().Valid():
+		return nil, fmt.Errorf("tüketici: örnekleme politikası zorunlu (ADR-14)")
 	}
 
 	client, err := kgo.NewClient(
@@ -96,7 +110,13 @@ func NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Consumer{client: client, engine: cfg.Engine, handler: cfg.Handler, log: log}, nil
+	return &Consumer{
+		client:  client,
+		engine:  cfg.Engine,
+		handler: cfg.Handler,
+		sampler: cfg.Sampler,
+		log:     log,
+	}, nil
 }
 
 // Run, bağlam iptal edilene kadar kayıtları tüketir.
@@ -138,6 +158,12 @@ func (c *Consumer) Run(ctx context.Context) error {
 				return
 			}
 
+			if !c.sampler.Includes(rec.EventID) {
+				c.skipped++
+				return
+			}
+			c.analyzed++
+
 			result, err := c.engine.Process(rec)
 			if err != nil {
 				failed++
@@ -165,6 +191,15 @@ func (c *Consumer) Run(ctx context.Context) error {
 			c.log.Warn("bu partide işlenemeyen kayıt var", "adet", failed)
 		}
 	}
+}
+
+// Stats, örnekleme sonrası işlenen ve elenen olay sayılarını döndürür.
+//
+// İşlenen sayısı `run_config.analyzed_events` sütununa yazılır (ADR-23):
+// bütünlük denetimi `estimates = 5 × analyzed_events` beklentisini buradan
+// kurar.
+func (c *Consumer) Stats() (analyzed, skipped int64) {
+	return c.analyzed, c.skipped
 }
 
 // Close, tüketiciyi kapatır.

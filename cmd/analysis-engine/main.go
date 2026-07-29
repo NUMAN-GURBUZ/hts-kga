@@ -14,6 +14,7 @@
 //	HTS_CONFIG      senaryo YAML yolu (zorunlu)
 //	HTS_RUN_ID      işlenecek koşunun kimliği (zorunlu — ADR-05)
 //	HTS_LAMBDA      kalibrasyon parametresi (varsayılan 1.0; S5'te λ* gelir)
+//	HTS_SAMPLE_MODE validation | calibration | full (varsayılan validation)
 //	POSTGRES_*      bağlantı bilgileri
 //	KAFKA_BROKERS   virgülle ayrılmış broker listesi
 //	REDIS_ADDR      Redis adresi
@@ -36,6 +37,7 @@ import (
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/density"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/driver"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/params"
+	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/sampling"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/config"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/observability"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/observability/health"
@@ -144,12 +146,23 @@ func run() error {
 		return fmt.Errorf("tahmin yazıcısı kurulamadı: %w", err)
 	}
 
+	// ─── Örnekleme politikası (ADR-14, ADR-24) ───────────────────────────────
+	status, err := pool.RunStatusOf(initCtx, runID)
+	if err != nil {
+		return fmt.Errorf("koşu durumu okunamadı: %w", err)
+	}
+	sampler, err := buildSampler(scn, status)
+	if err != nil {
+		return err
+	}
+
 	// ─── Tüketici ────────────────────────────────────────────────────────────
 	consumer, err := driver.NewConsumer(driver.ConsumerConfig{
 		Brokers: strings.Split(envOr("KAFKA_BROKERS", "localhost:9092"), ","),
 		Group:   consumerGroup,
 		Engine:  engine,
 		Handler: persister,
+		Sampler: sampler,
 		Logger:  logger,
 	})
 	if err != nil {
@@ -160,7 +173,7 @@ func run() error {
 	slog.Info("analysis-engine başlatıldı",
 		"health", healthAddr, "run_id", runID, "senaryo", scn.Run.Scenario,
 		"hücre", inventory.Len(), "çözünürlük_m", scn.Analysis.GridResolutionM,
-		"lambda", lambda)
+		"lambda", lambda, "örnekleme", sampler.Mode())
 
 	runErr := consumer.Run(ctx)
 
@@ -171,9 +184,56 @@ func run() error {
 		slog.Error("kapanışta tampon boşaltılamadı", "hata", err)
 	}
 
+	// Analiz sayacı bütünlük denetiminin girdisidir (ADR-23 denetim 4).
+	analyzed, skipped := consumer.Stats()
+	if err := pool.SetAnalyzedEvents(flushCtx, runID, analyzed); err != nil {
+		slog.Error("analiz sayacı yazılamadı", "hata", err)
+	}
+
 	events, rows := persister.Stats()
-	slog.Info("analysis-engine kapatıldı", "olay", events, "tahmin_satırı", rows)
+	slog.Info("analysis-engine kapatıldı",
+		"işlenen_olay", events, "tahmin_satırı", rows,
+		"örneklemde", analyzed, "elenen", skipped)
 	return runErr
+}
+
+// buildSampler, örnekleme politikasını senaryo config'inden kurar (ADR-14).
+//
+// Kalibrasyon modunda seyreltme oranı için koşunun **gerçek** olay hacmi
+// gerekir; bu sayı simülatör tarafından `run_config.published_events`'e
+// yazılmıştır (ADR-23). Tahmin yerine ölçülmüş değeri kullanmak, örneklem
+// büyüklüğünü Poisson dalgalanmasından bağımsız kılar.
+//
+// Hacmi simülatör paketinden türetmek de mümkündü (ajan × gün × günlük hedef)
+// ama bu, analiz ikilisinin `internal/simulator`'a bağımlı olması demekti —
+// ADR-20 bunu açıkça yasaklıyor.
+func buildSampler(scn *config.Scenario, status postgres.RunStatus) (sampling.Policy, error) {
+	mode, err := sampling.ParseMode(envOr("HTS_SAMPLE_MODE", string(sampling.ModeValidation)))
+	if err != nil {
+		return sampling.Policy{}, err
+	}
+
+	cfg := sampling.Config{
+		Mode:         mode,
+		Seed:         scn.Run.Seed,
+		SplitRatio:   scn.Calibration.SplitRatio,
+		TargetEvents: scn.Analysis.Sample.CalibrationEvents,
+	}
+
+	if mode == sampling.ModeCalibration {
+		if status.PublishedEvents == nil {
+			return sampling.Policy{}, fmt.Errorf(
+				"kalibrasyon modu koşunun bitmiş olmasını gerektirir: " +
+					"run_config.published_events boş (önce simülasyonu tamamlayın)")
+		}
+		cfg.ExpectedTotalEvents = int(*status.PublishedEvents)
+	}
+
+	sampler, err := sampling.New(cfg)
+	if err != nil {
+		return sampling.Policy{}, fmt.Errorf("örnekleme politikası: %w", err)
+	}
+	return sampler, nil
 }
 
 // loadSettings, senaryo config'ini ve koşu parametrelerini okur.
