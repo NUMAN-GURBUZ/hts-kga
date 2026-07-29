@@ -15,6 +15,7 @@
 //
 //	HTS_PERSIST_MODE  records | groundtruth (zorunlu)
 //	HTS_GROUP         tüketici grubu; boşsa moddan türetilir
+//	HTS_IDLE_TIMEOUT  akış boşta kalınca çıkış süresi (örn. "20s"); boşsa süresiz
 //	POSTGRES_* · KAFKA_BROKERS
 package main
 
@@ -34,10 +35,22 @@ import (
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/storage/postgres"
 )
 
-const (
-	serviceVersion = "0.5.0-sprint5"
-	healthAddr     = ":8083"
-)
+const serviceVersion = "0.5.0-sprint5"
+
+// healthAddrFor, rol başına sağlık ucunu döndürür.
+//
+// İki rol aynı makinede birlikte çalışır (toplu koşum); tek bir sabit port
+// ikincisinin bağlanamayıp düşmesine yol açardı. HTS_HEALTH_ADDR ile
+// geçersiz kılınabilir.
+func healthAddrFor(mode string) string {
+	if v := os.Getenv("HTS_HEALTH_ADDR"); v != "" {
+		return v
+	}
+	if mode == "groundtruth" {
+		return ":8084"
+	}
+	return ":8083"
+}
 
 func main() {
 	if err := execute(); err != nil {
@@ -68,6 +81,7 @@ func execute() error {
 	}
 	defer func() { _ = prov.Shutdown(context.Background()) }()
 
+	healthAddr := healthAddrFor(mode)
 	h := health.New(serviceName, serviceVersion)
 	go h.MustServe(healthAddr)
 
@@ -83,17 +97,25 @@ func execute() error {
 	brokers := strings.Split(envOr("KAFKA_BROKERS", "localhost:9092"), ",")
 	group := envOr("HTS_GROUP", "hts-persister-"+mode)
 
+	var idle time.Duration
+	if v := os.Getenv("HTS_IDLE_TIMEOUT"); v != "" {
+		if idle, err = time.ParseDuration(v); err != nil {
+			return fmt.Errorf("HTS_IDLE_TIMEOUT geçersiz (%q): %w", v, err)
+		}
+	}
+
 	slog.Info("persister başlatıldı", "mod", mode, "grup", group, "health", healthAddr)
 
 	switch mode {
 	case "records":
 		consumer, err := persist.New(persist.Config[postgres.HTSRecordRow]{
-			Brokers: brokers,
-			Topic:   persist.TopicRecords,
-			Group:   group,
-			Decode:  persist.DecodeRecordRow,
-			Write:   pool.InsertHTSRecords,
-			Logger:  logger,
+			Brokers:     brokers,
+			Topic:       persist.TopicRecords,
+			Group:       group,
+			Decode:      persist.DecodeRecordRow,
+			Write:       pool.InsertHTSRecords,
+			IdleTimeout: idle,
+			Logger:      logger,
 		})
 		if err != nil {
 			return err
@@ -107,12 +129,13 @@ func execute() error {
 
 	default: // groundtruth
 		consumer, err := persist.New(persist.Config[postgres.GroundTruthRow]{
-			Brokers: brokers,
-			Topic:   persist.TopicGroundTruth,
-			Group:   group,
-			Decode:  persist.DecodeGroundTruthRow,
-			Write:   pool.InsertGroundTruth,
-			Logger:  logger,
+			Brokers:     brokers,
+			Topic:       persist.TopicGroundTruth,
+			Group:       group,
+			Decode:      persist.DecodeGroundTruthRow,
+			Write:       pool.InsertGroundTruth,
+			IdleTimeout: idle,
+			Logger:      logger,
 		})
 		if err != nil {
 			return err
