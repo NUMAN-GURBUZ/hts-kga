@@ -145,3 +145,131 @@ Analiz ADR-14 örneklemesiyle yapıldı (kentsel 5.000 / kırsal 3.000 'V' olay�
 kalibrasyon kentsel 5.000 / kırsal 2.000). Tüm ölçümler `partition_key='V'`
 kümesindedir (K4).
 
+### 7.1 Koşu hacimleri
+
+| Senaryo | Yayınlanan olay | `hts_records` | `ground_truth` | Analiz edilen | `estimates` |
+|---|---|---|---|---|---|
+| A kentsel TA'lı | 298.117 | 298.117 | 299.296 | 4.992 | 24.960 |
+| B kentsel TA'sız | 298.117 | 298.117 | 299.296 | 5.045 | 25.225 |
+| C kırsal TA'lı | 298.117 | 298.117 | 299.296 | 2.937 | 14.685 |
+| D kırsal TA'sız | 298.117 | 298.117 | 299.296 | 3.045 | 15.225 |
+
+Dört senaryoda yayınlanan olay sayısı **birebir aynıdır**: Poisson üreteci
+(tohum, ajan, tick) üçlüsünden beslenir, morfolojiden bağımsızdır. Senaryoları
+ayıran şey olay sayısı değil, o olayların nerede geçtiği ve TA'nın olup
+olmadığıdır — karşılaştırma bu sayede tek değişkenli kalır.
+
+`ground_truth` ile `hts_records` farkı (1.179 satır) enjeksiyon kural 4'ün
+sildiği kayıtlardır (ADR-09): olay gerçekleşti, kayıt "kayboldu".
+
+`verify_integrity` dört koşuda da dört denetimin tamamında **OK**.
+
+### 7.2 K1 — Kapsama (M@90, 'V' kümesi)
+
+| Senaryo | M@90 kapsama | B1 (dilim) kapsaması | M@90 / B1 | λ* | Eşik %85–95 |
+|---|---|---|---|---|---|
+| A | 0,5435 | 0,6038 | **0,900** | 2,9997 | ✗ |
+| B | 0,5841 | 0,5980 | 0,977 | 2,9997 | ✗ |
+| C | 0,5247 | 0,5778 | **0,908** | 2,9997 | ✗ |
+| D | 0,5741 | 0,5773 | 0,994 | 2,9997 | ✗ |
+
+**K1 dört senaryoda da tutmadı** ve nedeni ölçüldü.
+
+Kritik sayı üçüncü sütundur. TA'lı senaryolarda M@90'ın kapsaması, sektör
+diliminin kapsamasının **%90,0 ve %90,8'idir** — yani model, *arama bölgesi
+içinde* tam olarak beyan ettiği gibi %90 kalibredir. Açığın tamamı bölgenin
+kendisinden gelir: gerçek konumun %40–42'si serving hücrenin ±32,5°'lik
+diliminin dışındadır ve model oraya hiç kütle koymaz.
+
+Kök neden Sprint 3'ün arama bölgesi tanımıdır (T-E03-03): simülatörün
+best-server'ı tüm yönlerde çalışır (gölgeleme ve anten deseni birlikte),
+analiz ise bölgeyi 3 dB hüzme genişliğiyle sınırlar. Bir hücre, hüzmesinin
+dışındaki bir noktada da pekâlâ en güçlü sunucu olabilir.
+
+λ bu açığı kapatamaz: kalibrasyon λ = 3,0 üst sınırına dayandı ve kapsama
+λ ∈ [0,5, 3,0] boyunca yalnızca %1–3 değişti (ADR-25'te ölçüldü). λ yalnızca
+σ_eff'i ölçekler; arama bölgesinin sert sınırını genişletmez.
+
+### 7.3 K2 / K3 — Alan daralması ('V' kümesi, M@90)
+
+| Senaryo | M@90 alan | B0 alan | B1 alan | K2 (vs B0) | K3 (vs B1) | Eşik |
+|---|---|---|---|---|---|---|
+| A kentsel TA'lı | 0,0392 km² | 118,46 km² | 21,39 km² | **%99,97** | **%99,82** | K2 ≥75 · K3 ≥50 ✓ |
+| B kentsel TA'sız | 10,47 km² | 118,46 km² | 21,39 km² | **%91,16** | **%51,05** | K2 ≥75 · K3 ≥20 ✓ |
+| C kırsal TA'lı | 0,2737 km² | 3018,70 km² | 545,03 km² | **%99,99** | **%99,95** | K2 ≥75 · K3 ≥50 ✓ |
+| D kırsal TA'sız | 261,36 km² | 3017,49 km² | 544,59 km² | **%91,34** | **%52,01** | K2 ≥75 · K3 ≥20 ✓ |
+
+**K2 ve K3 dört senaryoda da tuttu**, TA'sız senaryolarda eşiğin iki buçuk
+katıyla (%51–52 vs %20 eşiği).
+
+TA'nın katkısı çarpıcıdır: kentselde alan 10,47 km²'den 0,0392 km²'ye,
+kırsalda 261 km²'den 0,27 km²'ye iner — **267× ve 955× daralma**. Timing
+Advance'ın 78 metrelik halkası, sektör dilimini ince bir yaya indirger.
+
+### 7.4 Konum hatası (F.3, merkez ↔ gerçek konum)
+
+| Senaryo | M@90 r50 | M@90 r95 | B1 r50 | Kazanç (r50) |
+|---|---|---|---|---|
+| A | 150 m | 676 m | 3.569 m | **24×** |
+| B | 1.721 m | 3.755 m | 3.590 m | 2,1× |
+| C | 590 m | 2.117 m | 17.871 m | **30×** |
+| D | 9.189 m | 18.544 m | 17.757 m | 1,9× |
+
+Nokta kestirimi, bölge kapsaması tutmasa bile taban çizgisinden belirgin
+biçimde iyidir. TA'lı senaryolarda 24–30 kat; TA'sızlarda ~2 kat.
+
+### 7.5 K8 — Geometri kararlılığı (ADR-26 çözünürlükleriyle)
+
+| Senaryo | M@50 p95 | M@90 p95 | M@95 p95 | `repaired_ratio` |
+|---|---|---|---|---|
+| A | 2 | **1** | 1 | 0,000000 |
+| B | 2 | **3** | 3 | 0,000000 |
+| C | 5 | **2** | 1 | 0,000000 |
+| D | 2 | **3** | 4 | 0,000000 |
+
+ADR-26 kararı (kentsel 50 m, kırsal 150 m) işe yaradı: Sprint 4'te 100/250 m
+ile M@90 p95 değerleri 4 ve 7 iken şimdi **dört senaryoda da ≤ 3**. Onarım
+oranı sıfırdır — kenar izlemesi (ADR-21) hiçbir koşuda geçersiz geometri
+üretmedi (2.400 satırdan 80.095 satıra çıkan ölçekte de).
+
+M@50'de kırsal TA'lı senaryonun p95'i 5'tir; kütlenin en yoğun yarısı ince TA
+yayı üzerinde birkaç parçaya bölünüyor. Bu seviye kriterin konusu değildir
+(karşılaştırma seviyesi %90'dır) ve bilgi amaçlı raporlanır.
+
+## 8. K1–K5 durumu
+
+| Kriter | Eşik | Sonuç | Durum |
+|---|---|---|---|
+| **K1** | Kapsama@90 ∈ [%85, %95], 4 senaryo | 0,52–0,58 | ❌ **Tutmadı** — nedeni ölçüldü (arama bölgesi tavanı), model dilim içinde %90,0–90,8 kalibre |
+| **K2** | M@90 vs B0 daralma ≥ %75 | %91,2–99,99 | ✅ Dört senaryoda tuttu |
+| **K3** | M@90 vs B1: TA var ≥%50 · TA yok ≥%20 | %99,8/%99,95 · %51,1/%52,0 | ✅ Dört senaryoda tuttu |
+| **K4** | Karışık sorgu → hata | Tip düzeyinde imkânsız + test | ✅ |
+| **K5** | 4 senaryo koşulmuş ve raporlanmış | A, B, C, D | ✅ |
+
+K8 (S4 kriteri) da bu koşumlarla yeniden ölçüldü: `repaired_ratio` = 0 ve
+M@90 `p95_part_count` ≤ 3 → ✅.
+
+**K1 hakkında.** Plan BÖLÜM J eşiklerin ölçümden önce beyan edildiğini ve
+sonuca göre değiştirilmeyeceğini söyler. K1 tutmadı; eşik değiştirilmedi,
+model de sonucu kurtarmak için değiştirilmedi. Bunun yerine açığın nereden
+geldiği ölçülerek gösterildi. Bu, planın K3 için öngördüğü "negatif bulgu da
+geçerli bir sonuçtur" duruşunun K1'e uygulanmasıdır.
+
+## 9. Kalan teknik borçlar
+
+| # | Borç | Etki |
+|---|---|---|
+| 1 | **Arama bölgesi tanımı** — hüzme genişliği yerine "bu hücrenin best-server olabileceği bölge" | K1'in tek engeli; Sprint 6'da karar bekliyor |
+| 2 | Kafka ACL yapılandırılmamış (broker'da authorizer yok) | K6'nın 1. katmanı fiilen yok; 2. ve 3. katman çalışıyor ve testli |
+| 3 | `median_haversine_m` = `r50_m` tautolojisi (plandan devralındı) | Şema değişikliği gerektirir; ölçüm anlamı bozulmasın diye korundu |
+| 4 | Kalibrasyon 12 iterasyon boyunca düz eğride koşuyor | ~30 dk/senaryo boşa; erken çıkış eşiği eklenebilir |
+| 5 | Senaryolar arası topic tazeleme elle yapılıyor | Koşum betiği otomatikleştirebilir |
+
+## 10. Sprint 6'ya devredilen işler
+
+1. **T-E04-09** — bütünlük precision/recall (F.5); `integrity_findings`
+   dolduğunda ölçülebilir.
+2. **Arama bölgesi kararı** — K1'in kaderi buna bağlı. Ölçüm hazır: bölge
+   genişletilirse kapsama tavanı da yükselir, K1 yeniden ölçülebilir.
+3. **E05 — beş tespit kuralı** (envanter, hız 300, zaman, yörünge, aktivite)
+   ve K7.
