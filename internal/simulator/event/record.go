@@ -31,9 +31,15 @@ import (
 // EventType, olay tipidir (hts_records.event_type, VARCHAR(8)).
 type EventType string
 
+// Değerler `hts_records.event_type` CHECK kısıtıyla birebir aynı olmalıdır
+// (001_schema.sql, plan BÖLÜM D): şema telekom standardı kısaltmaları
+// kullanır. Genel bir "CALL" değeri kısıtı ihlal eder ve toplu yazmanın
+// tamamını düşürür — G2 entegrasyon testi bunu yakaladı.
 const (
-	// EventCall, sesli arama kaydıdır.
-	EventCall EventType = "CALL"
+	// EventMOC, abonenin başlattığı sesli aramadır (mobile originated call).
+	EventMOC EventType = "MOC"
+	// EventMTC, aboneye gelen sesli aramadır (mobile terminated call).
+	EventMTC EventType = "MTC"
 	// EventSMS, kısa mesaj kaydıdır.
 	EventSMS EventType = "SMS"
 	// EventData, veri oturumu kaydıdır.
@@ -45,7 +51,11 @@ const (
 // Dağılım plan tarafından tanımlanmamıştır; tip kütle üretimini, kapsama
 // hesabını veya metrikleri **etkilemez**. Bu yüzden ajan-tick hash'inden
 // düzgün dağılımla seçilir ve bilimsel bir varsayım yapılmaz.
-var eventTypes = [...]EventType{EventCall, EventSMS, EventData}
+//
+// `IDLE` listede yoktur: şema onu kabul eder ama bu, olay üretmeyen bir
+// durumdur ve simülatörde kapsama dışı gözlem olarak zaten temsil edilir
+// (ADR-08/3) — kayıt hiç yazılmaz.
+var eventTypes = [...]EventType{EventMOC, EventMTC, EventSMS, EventData}
 
 // HTSRecord, operatör kaydıdır (hts_records satırı).
 //
