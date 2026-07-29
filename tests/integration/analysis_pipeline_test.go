@@ -34,6 +34,7 @@ import (
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/density"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/driver"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/params"
+	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/sampling"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/config"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/rf"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/simulator/inventory"
@@ -302,11 +303,22 @@ func runPipeline(t *testing.T, configFile string) {
 		t.Fatalf("NewPersister: %v", err)
 	}
 
+	// Bu test tüm olayları ölçer: örnekleme modu "full" (ADR-24).
+	sampler, err := sampling.New(sampling.Config{
+		Mode:       sampling.ModeFull,
+		Seed:       fx.scenario.Run.Seed,
+		SplitRatio: fx.scenario.Calibration.SplitRatio,
+	})
+	if err != nil {
+		t.Fatalf("sampling.New: %v", err)
+	}
+
 	consumer, err := driver.NewConsumer(driver.ConsumerConfig{
 		Brokers: brokers,
 		Group:   "hts-analysis-test-" + fx.runID.String()[:8],
 		Engine:  engine,
 		Handler: persister,
+		Sampler: sampler,
 	})
 	if err != nil {
 		t.Fatalf("NewConsumer: %v", err)
