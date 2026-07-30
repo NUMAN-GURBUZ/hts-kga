@@ -1,0 +1,37 @@
+/* HTS-KGA görselleştirme stilleri (E07). */
+* { box-sizing: border-box; }
+body { margin: 0; display: flex; height: 100vh; font: 13px/1.5 system-ui, sans-serif;
+       background: #0d1117; color: #c9d1d9; }
+#sidebar { width: 320px; flex: none; overflow-y: auto; padding: 16px 18px;
+           background: #161b22; border-right: 1px solid #21262d; }
+#map { flex: 1; background: #141b24; }
+h1 { margin: 0; font-size: 18px; color: #58a6ff; letter-spacing: .5px; }
+h2 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; color: #8b949e;
+     letter-spacing: .8px; }
+.sub { margin: 2px 0 18px; color: #8b949e; font-size: 11px; }
+section { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid #21262d; }
+label { display: block; font-size: 11px; color: #8b949e; margin-bottom: 4px; }
+select, input[type=text], input:not([type]) { width: 100%; padding: 6px 8px;
+    background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 5px; }
+.chk { display: flex; align-items: center; gap: 7px; color: #c9d1d9; font-size: 12px;
+       margin: 5px 0; cursor: pointer; }
+.chk input { margin: 0; }
+.indent { margin: 6px 0 0 20px; }
+.badge { background: #1f6feb; color: #fff; border-radius: 9px; padding: 0 6px;
+         font-size: 10px; }
+.hint { margin: 0 0 6px; font-size: 10px; color: #6e7681; font-style: italic; }
+.meta { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 11px;
+        color: #8b949e; margin-top: 6px; }
+.link { background: none; border: none; color: #58a6ff; cursor: pointer; padding: 4px 0;
+        font-size: 11px; text-decoration: underline; }
+#status { position: sticky; bottom: 0; padding: 8px 10px; border-radius: 5px;
+          font-size: 11px; background: #0d1117; min-height: 18px; }
+#status.ok { color: #3fb950; } #status.warn { color: #d29922; }
+#status.error { color: #f85149; background: #2d1214; }
+#popup { position: absolute; right: 16px; top: 16px; z-index: 1000; max-width: 460px;
+         max-height: 70vh; overflow: auto; background: #161b22; border: 1px solid #30363d;
+         border-radius: 7px; padding: 12px 14px; }
+#popup.hidden { display: none; }
+#popup pre { margin: 0; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+#popup-close { position: absolute; right: 8px; top: 6px; background: none; border: none;
+               color: #8b949e; font-size: 18px; cursor: pointer; }

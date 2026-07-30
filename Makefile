@@ -34,6 +34,7 @@ test-integration: ## Altyapı gerektiren testleri çalıştır (T-E02-06) — ö
 	HTS_TEST_PG_DSN="$(PGDSN)" \
 	HTS_TEST_REDIS_ADDR="localhost:6379" \
 	HTS_TEST_KAFKA_BROKERS="localhost:9092" \
+	HTS_TEST_GATEWAY_DSN="postgres://svc_gateway:gateway_dev_pw@localhost:5432/$(POSTGRES_DB)?sslmode=disable" \
 	KAFKA_SASL_USER=svc_test \
 	KAFKA_SASL_PASSWORD="$(KAFKA_PW_TEST)" \
 	$(GO) test $(GOFLAGS) -count=1 -v ./tests/integration/...
@@ -178,3 +179,17 @@ verify-k7: ## K7 ölçümünü göster (integrity_metrics) — RUN_ID=...
 		            WHEN precision >= 0.90 THEN 'geçti' \
 		            ELSE 'tutmadı' END AS k7 \
 		  FROM integrity_metrics WHERE run_id = '$(RUN_ID)' ORDER BY rule_id;"
+
+# ==============================================================================
+# API Gateway — Sprint 7 (E06/E07, ADR-12, ADR-13, ADR-33)
+# ==============================================================================
+
+.PHONY: gateway proto
+
+gateway: ## API Gateway'i başlat (REST :8080 · gRPC :50051 · health :8086)
+	$(GO) run ./cmd/gateway
+
+proto: ## proto/ sözleşmesinden Go kodu üret (protoc + eklentiler gerekli)
+	protoc --go_out=. --go_opt=module=$(MODULE) \
+	       --go-grpc_out=. --go-grpc_opt=module=$(MODULE) \
+	       proto/hts/v1/hts.proto
