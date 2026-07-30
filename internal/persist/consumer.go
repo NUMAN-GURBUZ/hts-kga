@@ -110,13 +110,18 @@ func New[T any](cfg Config[T]) (*Consumer[T], error) {
 		log = slog.Default()
 	}
 
-	client, err := kgo.NewClient(
-		kgo.SeedBrokers(cfg.Brokers...),
+	// Kimlik ortamdan gelir (ADR-32/4): `records` rolü svc_records_persister,
+	// `groundtruth` rolü svc_gt_persister olarak bağlanır.
+	base, err := kafka.ClientOptions(cfg.Brokers, kafka.CredentialsFromEnv())
+	if err != nil {
+		return nil, fmt.Errorf("persister: %w", err)
+	}
+	client, err := kgo.NewClient(append(base,
 		kgo.ConsumerGroup(cfg.Group),
 		kgo.ConsumeTopics(cfg.Topic),
 		// Offset yalnızca yazma bittikten sonra ilerletilir.
 		kgo.DisableAutoCommit(),
-	)
+	)...)
 	if err != nil {
 		return nil, fmt.Errorf("persister: bağlantı kurulamadı: %w", err)
 	}

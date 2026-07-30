@@ -30,10 +30,19 @@ build: ## Tüm cmd/* ikilileri derle
 test: ## Tüm testleri çalıştır (birim + PBT); altyapı gerektirenler atlanır
 	$(GO) test $(GOFLAGS) -race -count=1 ./...
 
-test-integration: ## Altyapı gerektiren testleri çalıştır (T-E02-06) — önce: make infra-up
+test-integration: ## Altyapı gerektiren testleri çalıştır (T-E02-06) — önce: make setup
 	HTS_TEST_PG_DSN="$(PGDSN)" \
 	HTS_TEST_REDIS_ADDR="localhost:6379" \
+	HTS_TEST_KAFKA_BROKERS="localhost:9092" \
+	KAFKA_SASL_USER=svc_test \
+	KAFKA_SASL_PASSWORD="$(KAFKA_PW_TEST)" \
 	$(GO) test $(GOFLAGS) -count=1 -v ./tests/integration/...
+
+# NOT (ADR-32): entegrasyon testleri hem üretir hem tüketir ve S3b rolünü de
+# oynar (F.5 ground truth okur), bu yüzden `svc_test` kimliğiyle koşarlar.
+# svc_test bir SERVİS kimliği değildir ve üretim topolojisinde hiçbir zaman
+# koşmaz; K6'nın iddiası svc_analysis/svc_integrity üzerinedir ve
+# make verify-isolation onu bu kimliklerle sınar.
 
 lint: ## golangci-lint (CI'da zorunlu)
 	golangci-lint run ./...
@@ -143,3 +152,29 @@ help: ## Bu yardım metnini göster
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
 .DEFAULT_GOAL := help
+
+# ==============================================================================
+# Bütünlük denetimi — Sprint 6 (E05, ADR-27..31)
+# ==============================================================================
+
+.PHONY: integrity-stream integrity-batch verify-k7
+
+integrity-stream: ## Bütünlük akış fazı (kural 1, 3) — RUN_ID=... CONFIG=...
+	HTS_INTEGRITY_MODE=stream HTS_CONFIG=$(CONFIG) HTS_RUN_ID=$(RUN_ID) \
+		$(GO) run ./cmd/integrity
+
+integrity-batch: ## Bütünlük toplu fazı (kural 5, 2) — RUN_ID=... CONFIG=...
+	HTS_INTEGRITY_MODE=batch HTS_CONFIG=$(CONFIG) HTS_RUN_ID=$(RUN_ID) \
+		$(GO) run ./cmd/integrity
+
+verify-k7: ## K7 ölçümünü göster (integrity_metrics) — RUN_ID=...
+	@PGPASSWORD=$(POSTGRES_PASSWORD) psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) -c "\
+		SELECT rule_id, rule_name, findings, true_positives, injected, \
+		       round(precision::numeric,4) AS precision, \
+		       round(recall::numeric,4)    AS recall, \
+		       sufficient, \
+		       CASE WHEN precision IS NULL THEN 'ölçülemedi' \
+		            WHEN NOT sufficient    THEN 'yetersiz' \
+		            WHEN precision >= 0.90 THEN 'geçti' \
+		            ELSE 'tutmadı' END AS k7 \
+		  FROM integrity_metrics WHERE run_id = '$(RUN_ID)' ORDER BY rule_id;"

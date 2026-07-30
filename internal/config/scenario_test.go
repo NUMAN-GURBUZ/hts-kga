@@ -251,6 +251,16 @@ func TestParse_ValidationRules(t *testing.T) {
 			"rx_sensitivity_dbm: -110\n  propagation_model: \"COST231\""},
 		{"geçersiz override r_max", "rx_sensitivity_dbm: -110",
 			"rx_sensitivity_dbm: -110\n  r_max_m: -5"},
+		// Tespit bölümü (ADR-27..31). Sıfır bırakılan alan varsayılan alır,
+		// bu yüzden geçersizlik ancak açıkça yazılmış kötü değerle sınanır.
+		{"margin üst sınırı 1'in altında", "injection_rate: 0.02",
+			"injection_rate: 0.02\n  detection:\n    velocity_margin_cap: 0.5"},
+		{"negatif zaman toleransı", "injection_rate: 0.02",
+			"injection_rate: 0.02\n  detection:\n    time_backstep_tolerance_s: -1"},
+		{"aktivite desteği 1'in altında", "injection_rate: 0.02",
+			"injection_rate: 0.02\n  detection:\n    activity_min_support: -3"},
+		{"asgari bulgu sayısı negatif", "injection_rate: 0.02",
+			"injection_rate: 0.02\n  detection:\n    min_findings_for_threshold: -1"},
 	}
 
 	for _, tc := range tests {
@@ -261,6 +271,79 @@ func TestParse_ValidationRules(t *testing.T) {
 			}
 			if _, err := Parse([]byte(mutated)); err == nil {
 				t.Errorf("%s: hata bekleniyordu, nil döndü", tc.name)
+			}
+		})
+	}
+}
+
+// TestParse_DetectionDefaults, tespit bölümü yazılmadığında ADR sabitlerinin
+// uygulandığını sınar (ADR-29, ADR-31).
+//
+// Varsayılanların sessizce yanlış olması, kural 2'nin `margin` alanının
+// veritabanı CHECK kısıtına takılması veya K7 ölçülebilirlik eşiğinin
+// kaybolması demek olurdu; ikisi de ancak tam koşuda fark edilirdi.
+func TestParse_DetectionDefaults(t *testing.T) {
+	s, err := Parse([]byte(minimalYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	d := s.Integrity.Detection
+	if d.VelocityMarginCap != DefaultVelocityMarginCap {
+		t.Errorf("velocity_margin_cap = %g, beklenen %g", d.VelocityMarginCap, DefaultVelocityMarginCap)
+	}
+	if d.TimeBackstepToleranceS != 0 {
+		t.Errorf("time_backstep_tolerance_s = %g, beklenen 0 (ADR-29 katı karşılaştırma)",
+			d.TimeBackstepToleranceS)
+	}
+	if d.ActivityMinSupport != DefaultActivityMinSupport {
+		t.Errorf("activity_min_support = %d, beklenen %d", d.ActivityMinSupport, DefaultActivityMinSupport)
+	}
+	if d.MinFindingsForThreshold != DefaultMinFindingsForThreshold {
+		t.Errorf("min_findings_for_threshold = %d, beklenen %d",
+			d.MinFindingsForThreshold, DefaultMinFindingsForThreshold)
+	}
+}
+
+// TestLoad_DetectionDeclaredInEveryScenario, dört senaryo config'inin ve
+// duman testi config'inin tespit parametrelerini **açıkça** beyan ettiğini
+// sınar.
+//
+// Varsayılana güvenmek yeterli olurdu; ama ADR-29 spesifikasyonun ölçümden önce
+// yazılı olmasını şart koşuyor. Config'de görünmeyen bir eşik, raporda
+// "önceden beyan edildi" diye savunulamaz.
+func TestLoad_DetectionDeclaredInEveryScenario(t *testing.T) {
+	files := []string{
+		"urban_ta.yaml", "urban_no_ta.yaml",
+		"rural_ta.yaml", "rural_no_ta.yaml", "smoke.yaml",
+	}
+
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			path := filepath.Join(configsDir, file)
+
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("okunamadı: %v", err)
+			}
+			for _, key := range []string{
+				"velocity_margin_cap", "time_backstep_tolerance_s",
+				"activity_min_support", "min_findings_for_threshold",
+			} {
+				if !strings.Contains(string(raw), key) {
+					t.Errorf("%s config'de beyan edilmemiş (ADR-29)", key)
+				}
+			}
+
+			s, err := Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := s.Integrity.Detection.MinFindingsForThreshold; got != 30 {
+				t.Errorf("min_findings_for_threshold = %d, ADR-31 30 diyor", got)
+			}
+			if got := s.Integrity.MaxVelocityKMH; got != 300 {
+				t.Errorf("max_velocity_kmh = %g, BÖLÜM C.1 300 diyor", got)
 			}
 		})
 	}

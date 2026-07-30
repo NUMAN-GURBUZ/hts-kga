@@ -31,6 +31,7 @@ import (
 
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/storage/postgres"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/validation/comparison"
+	"github.com/NUMAN-GURBUZ/hts-kga/internal/validation/integrity"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/validation/metrics"
 )
 
@@ -64,6 +65,25 @@ type Options struct {
 	IncludeCalibrationMetrics bool
 	// Recompute true ise koşunun mevcut ölçümleri silinip yeniden yazılır.
 	Recompute bool
+	// IntegrityMinFindings, K7 ölçülebilirlik eşiğidir (ADR-31/9).
+	//
+	// 0 ise F.5 **atlanır**: bütünlük ölçümü yalnızca açıkça istendiğinde
+	// koşar, çünkü `integrity_findings` boşsa (S4 koşmadıysa) tüm kurallar
+	// "ölçülemedi" satırı yazar ve bu rapora gürültü katar.
+	IntegrityMinFindings int
+	// IntegrityOnly true ise yalnızca F.5 koşar; K1–K3 hattı atlanır.
+	//
+	// # Neden ayrı bir mod gerekiyor
+	//
+	// K1–K3'ün önkoşulu "analiz tamamlandı"dır (`analyzed_events` yazılı,
+	// ADR-23). F.5 ise `estimates` tablosuna **hiç dokunmaz**: bütünlük
+	// denetimi kütle modelinden, kontur çıkarımından ve λ'dan bağımsızdır.
+	// Analiz önkoşulunu F.5'e uygulamak, K7'yi ölçmek için gereksiz saatler
+	// harcamak demek olurdu.
+	//
+	// F.5'in kendi önkoşulu vardır ve o denetlenir: bütünlük fazları koştu mu
+	// (`inspected_records` yazılı) ve ground truth yazıldı mı.
+	IntegrityOnly bool
 }
 
 // Report, doğrulama koşusunun çıktısıdır.
@@ -76,13 +96,31 @@ type Report struct {
 	Calibration   []metrics.Row
 	Reduction     comparison.Result
 	EqualSets     bool
-	Duration      time.Duration
+	// Integrity, K7 ölçümüdür (F.5). IntegrityMinFindings 0 ise nil.
+	Integrity *integrity.Report
+	Duration  time.Duration
 }
 
 // Run, doğrulama hattını yürütür.
 func (p *Pipeline) Run(ctx context.Context, opts Options) (Report, error) {
 	started := time.Now()
 	report := Report{RunID: opts.RunID, Scenario: opts.Scenario}
+
+	// ─── 0. Yalnızca F.5 modu ────────────────────────────────────────────────
+	if opts.IntegrityOnly {
+		if opts.IntegrityMinFindings <= 0 {
+			return report, fmt.Errorf(
+				"yalnızca-bütünlük modu: IntegrityMinFindings zorunlu (ADR-31/9)")
+		}
+		if err := p.checkIntegrityPrecondition(ctx, opts.RunID); err != nil {
+			return report, err
+		}
+		if err := p.runIntegrity(ctx, &report, opts); err != nil {
+			return report, err
+		}
+		report.Duration = time.Since(started)
+		return report, nil
+	}
 
 	// ─── 1. Önkoşul ──────────────────────────────────────────────────────────
 	checks, err := CheckPreconditions(ctx, p.pool, opts.RunID)
@@ -167,8 +205,82 @@ func (p *Pipeline) Run(ctx context.Context, opts Options) (Report, error) {
 			"satır", len(calib))
 	}
 
+	// ─── 6. Bütünlük ölçümü — F.5 (K7) ───────────────────────────────────────
+	//
+	// Etiketi (`ground_truth.injected_rule`) yalnızca bu servis görebilir:
+	// `svc_validation` rolünün SELECT yetkisi vardır, `svc_integrity`'nin
+	// yoktur (ADR-09 katman 2). Ölçüm bu yüzden dedektörün değil doğrulamanın
+	// işidir.
+	if opts.IntegrityMinFindings > 0 {
+		if err := p.runIntegrity(ctx, &report, opts); err != nil {
+			return report, err
+		}
+	}
+
 	report.Duration = time.Since(started)
 	return report, nil
+}
+
+// runIntegrity, F.5'i hesaplar ve `integrity_metrics` tablosuna yazar.
+func (p *Pipeline) runIntegrity(ctx context.Context, report *Report, opts Options) error {
+	k7, err := integrity.Compute(ctx, p.pool.Querier(), integrity.Options{
+		RunID:       opts.RunID,
+		MinFindings: opts.IntegrityMinFindings,
+	})
+	if err != nil {
+		return err
+	}
+	if err := integrity.Write(ctx, p.pool.Querier(), k7); err != nil {
+		return err
+	}
+	report.Integrity = &k7
+	report.Scenario = k7.Scenario
+	p.log.Info("bütünlük ölçümü yazıldı (F.5)",
+		"kural", len(k7.Rows), "özet", k7.K7Verdict())
+	return nil
+}
+
+// checkIntegrityPrecondition, F.5'in kendi önkoşulunu denetler.
+//
+// K1–K3'ün "analiz tamamlandı" önkoşulundan farklıdır ve olması gereken de bu:
+// F.5 `estimates`'e dokunmaz. Denetlenen iki şey:
+//
+//	(a) ground_truth yazıldı  → etiket olmadan precision/recall ölçülemez
+//	(b) inspected_records yazılı → bütünlük akış fazı koştu (ADR-31/7)
+//
+// (b) sağlanmazsa `integrity_findings` boş ya da eksiktir ve ölçüm düşük recall
+// verir; bu bir bulgu gibi görünürdü.
+func (p *Pipeline) checkIntegrityPrecondition(ctx context.Context, runID uuid.UUID) error {
+	truths, err := p.pool.CountGroundTruth(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("F.5 önkoşulu: %w", err)
+	}
+	if truths == 0 {
+		return fmt.Errorf(
+			"F.5 önkoşulu: koşu %s için ground_truth boş — enjeksiyon etiketi "+
+				"olmadan precision/recall ölçülemez (ADR-09)", runID)
+	}
+
+	status, err := p.pool.RunStatusOf(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("F.5 önkoşulu: %w", err)
+	}
+	if status.InspectedRecords == nil {
+		return fmt.Errorf(
+			"F.5 önkoşulu: koşu %s için inspected_records yazılmamış — bütünlük "+
+				"akış fazı koşmadı; ölçüm boş bulgu kümesi üzerinde yapılırdı (ADR-31/7)",
+			runID)
+	}
+	if status.PublishedEvents != nil && *status.InspectedRecords != *status.PublishedEvents {
+		return fmt.Errorf(
+			"F.5 önkoşulu: bütünlük akış fazı yarım kaldı (%d/%d incelendi) — "+
+				"düşük recall bilimsel bulgu gibi görünürdü (ADR-31/7)",
+			*status.InspectedRecords, *status.PublishedEvents)
+	}
+
+	p.log.Info("F.5 önkoşulu geçti",
+		"ground_truth", truths, "incelenen_kayıt", *status.InspectedRecords)
+	return nil
 }
 
 // Summary, raporun okunabilir özetidir.
@@ -189,5 +301,9 @@ func (r Report) Summary() string {
 
 	out += fmt.Sprintf("  daralma: M@90 vs B0 %%%.1f (K2 ≥ %%75) · vs B1 %%%.1f (K3)\n",
 		r.Reduction.ReductionVsB0*100, r.Reduction.ReductionVsB1*100)
+
+	if r.Integrity != nil {
+		out += "  " + r.Integrity.K7Verdict() + "\n"
+	}
 	return out
 }

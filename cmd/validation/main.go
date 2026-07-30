@@ -11,6 +11,8 @@
 //	HTS_CALIBRATE     "true" ise λ kalibrasyonu çalıştırılır (ADR-02)
 //	HTS_RECOMPUTE     "true" ise koşunun mevcut ölçümleri silinip yeniden yazılır
 //	HTS_CALIB_METRICS "true" ise 'C' kümesi için de ölçüm yazılır (bilgi amaçlı)
+//	HTS_INTEGRITY     "true" ise F.5 bütünlük precision/recall ölçümü koşar (K7)
+//	HTS_INTEGRITY_ONLY "true" ise YALNIZCA F.5 koşar; K1-K3 hattı atlanır
 //	POSTGRES_* · REDIS_ADDR
 //
 // Çıkış kodu: önkoşul karşılanmazsa ya da ölçüm başarısız olursa 1.
@@ -114,6 +116,13 @@ func execute() error {
 		Scenario:                  scn.Run.Scenario,
 		IncludeCalibrationMetrics: envBool("HTS_CALIB_METRICS"),
 		Recompute:                 envBool("HTS_RECOMPUTE"),
+		// F.5 yalnızca açıkça istendiğinde koşar: integrity_findings boşsa
+		// (S4 koşmadıysa) tüm kurallar "ölçülemedi" satırı yazar ve rapora
+		// gürültü katar.
+		IntegrityMinFindings: integrityMinFindings(scn),
+		// Yalnızca K7 ölçümü: analiz motoru koşmamış olabilir ve F.5'in ona
+		// ihtiyacı yoktur (estimates'e dokunmaz).
+		IntegrityOnly: envBool("HTS_INTEGRITY_ONLY"),
 	})
 	if err != nil {
 		return err
@@ -167,4 +176,16 @@ func envOr(key, fallback string) string {
 func envBool(key string) bool {
 	v := os.Getenv(key)
 	return v == "1" || v == "true" || v == "TRUE"
+}
+
+// integrityMinFindings, F.5'in ölçülebilirlik eşiğini döndürür (ADR-31/9).
+//
+// 0 dönerse F.5 atlanır. Eşik senaryo config'inden gelir
+// (integrity.detection.min_findings_for_threshold) — ölçümden önce beyan
+// edilmiş bir değerin komut satırından ezilmemesi bilinçlidir.
+func integrityMinFindings(s *config.Scenario) int {
+	if !envBool("HTS_INTEGRITY") && !envBool("HTS_INTEGRITY_ONLY") {
+		return 0
+	}
+	return s.Integrity.Detection.MinFindingsForThreshold
 }

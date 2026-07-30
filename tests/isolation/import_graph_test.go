@@ -73,10 +73,64 @@ func TestSharedContractsAreDependencyFree(t *testing.T) {
 		modulePath + "/pkg/ta",
 		modulePath + "/pkg/split",
 		modulePath + "/pkg/htswire",
+		modulePath + "/pkg/integrityrule",
 	} {
 		for _, dep := range listDeps(t, pkg) {
 			if strings.HasPrefix(dep, modulePath+"/internal/") {
 				t.Errorf("%s → %s\nortak sözleşme paketleri internal/ bağımlılığı taşıyamaz", pkg, dep)
+			}
+		}
+	}
+}
+
+// TestIntegrityDoesNotDependOnSimulator, bütünlük ağacının simülatöre — ve
+// özellikle **enjektöre** — bağımlı olmadığını sınar (ADR-27, T-E05-00).
+//
+// Enjektör hangi kaydın bozulduğunu bilir: `Apply` etiketi oraya koyar. S4 o
+// paketi import edebilseydi, aynı tohumdan enjeksiyon çekilişini yeniden
+// üretip hangi olayların enjekte edildiğini **hesaplayabilirdi**. O noktada
+// K7'nin bütün iddiası — "bütünlük tespiti kör testtir" — veritabanı rolleri ne
+// kadar sıkı olursa olsun geçersiz olurdu.
+//
+// Ortak kural kimlikleri bu yüzden `pkg/integrityrule`'dadır: kimlik paylaşmak
+// kuralın *hangi olayı* vurduğunu söylemez.
+func TestIntegrityDoesNotDependOnSimulator(t *testing.T) {
+	packages := listPackages(t, modulePath+"/internal/integrity/...")
+	if len(packages) == 0 {
+		t.Skip("internal/integrity altında henüz paket yok")
+	}
+	t.Logf("denetlenen bütünlük paketi: %d", len(packages))
+
+	for _, pkg := range packages {
+		for _, dep := range listDeps(t, pkg) {
+			if strings.HasPrefix(dep, forbidden) {
+				t.Errorf("%s → %s\n"+
+					"bütünlük katmanı simülatöre bağımlı olamaz (ADR-27). Ortak kural "+
+					"kimlikleri pkg/integrityrule'dadır; enjeksiyon mantığı simülatörde kalır.",
+					pkg, dep)
+			}
+		}
+	}
+}
+
+// TestIntegrityDoesNotDependOnAnalysis, bütünlük ağacının analiz ağacına
+// bağımlı olmadığını sınar.
+//
+// Ayrım kör testle ilgili değil, sorumlulukla ilgilidir: S4'ün ihtiyacı olan
+// envanter görünümü (hücre kimliği + site konumu) analiz motorunun ihtiyacından
+// çok küçüktür. `internal/analysis/params` import edilseydi bütünlük servisi
+// ızgara, hüzme deseni ve komşu seçimi kodunu da taşırdı — ve analiz
+// katmanındaki bir değişiklik bütünlük ölçümünü sessizce etkileyebilirdi.
+func TestIntegrityDoesNotDependOnAnalysis(t *testing.T) {
+	packages := listPackages(t, modulePath+"/internal/integrity/...")
+	if len(packages) == 0 {
+		t.Skip("internal/integrity altında henüz paket yok")
+	}
+
+	for _, pkg := range packages {
+		for _, dep := range listDeps(t, pkg) {
+			if strings.HasPrefix(dep, modulePath+"/internal/analysis/") {
+				t.Errorf("%s → %s\nbütünlük katmanı analiz katmanına bağımlı olamaz", pkg, dep)
 			}
 		}
 	}

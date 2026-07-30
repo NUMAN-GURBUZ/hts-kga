@@ -43,18 +43,19 @@ type Producer struct {
 
 // NewProducer, verilen broker adreslerine bağlanan bir üretici kurar.
 func NewProducer(brokers []string, opts ...kgo.Opt) (*Producer, error) {
-	if len(brokers) == 0 {
-		return nil, fmt.Errorf("kafka üreticisi: en az bir broker adresi gerekli")
+	// Kimlik ortamdan gelir (ADR-32/4): simülatör `svc_simulator` olarak
+	// bağlanır ve yalnızca iki topic'e WRITE yetkisi taşır.
+	base, err := ClientOptions(brokers, CredentialsFromEnv())
+	if err != nil {
+		return nil, fmt.Errorf("kafka üreticisi: %w", err)
 	}
-
-	base := []kgo.Opt{
-		kgo.SeedBrokers(brokers...),
+	base = append(base,
 		// Idempotent üretim varsayılan olarak açıktır: yeniden deneme
 		// yinelenen kayıt üretmez. ADR-01'in UNIQUE kısıtı yinelenen
 		// event_id'yi zaten reddederdi, ama hatayı Kafka katmanında
 		// önlemek koşuyu durdurmaktan iyidir.
 		kgo.ProducerBatchCompression(kgo.SnappyCompression()),
-	}
+	)
 
 	client, err := kgo.NewClient(append(base, opts...)...)
 	if err != nil {

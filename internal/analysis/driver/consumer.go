@@ -116,14 +116,20 @@ func NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 		return nil, fmt.Errorf("tüketici: run_id zorunlu (ADR-05)")
 	}
 
-	client, err := kgo.NewClient(
-		kgo.SeedBrokers(cfg.Brokers...),
+	// Kimlik ortamdan gelir (ADR-32/4): `svc_analysis` yalnızca hts.records
+	// üzerinde READ taşır; hts.groundtruth üzerinde hiçbir yetkisi yoktur
+	// (kör test katman 1).
+	base, err := kafka.ClientOptions(cfg.Brokers, kafka.CredentialsFromEnv())
+	if err != nil {
+		return nil, fmt.Errorf("tüketici: %w", err)
+	}
+	client, err := kgo.NewClient(append(base,
 		kgo.ConsumerGroup(cfg.Group),
 		kgo.ConsumeTopics(kafka.TopicRecords),
 		// Offset yalnızca işlem başarıyla bittikten sonra ilerletilir:
 		// otomatik commit, hata durumunda işlenmemiş kaydı atlardı.
 		kgo.DisableAutoCommit(),
-	)
+	)...)
 	if err != nil {
 		return nil, fmt.Errorf("tüketici: bağlantı kurulamadı: %w", err)
 	}
