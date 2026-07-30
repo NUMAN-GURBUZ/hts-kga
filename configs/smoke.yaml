@@ -1,0 +1,76 @@
+# configs/smoke.yaml — Küçük koşu (Sprint 6, Gün 3 kapısı)
+#
+# AMAÇ: hattı doğrulamak, ölçmek değil.
+#
+# urban_ta.yaml'ın (senaryo A) birebir kopyasıdır; yalnızca ajan sayısı ve süre
+# küçültülmüştür. Şebeke, radyo, TA ve bütünlük parametreleri **aynıdır** ki
+# hatta çıkan bir sorun config farkından değil kodun kendisinden gelsin.
+#
+# Beklenen hacim: 100 ajan × 3 gün × ~10 olay/gün ≈ 3.000 olay,
+# enjeksiyon oranı 0,02 → ~60 enjekte olay → kural başına ~12.
+#
+# Bu sayı ADR-31'in ölçülebilirlik eşiğinin (30 kanonik bulgu) ALTINDADIR ve
+# bilinçlidir: küçük koşuda K7 ölçülemez, dolayısıyla precision/recall
+# değerlerine bakılmaz (Sprint 6 planı, Bölüm 12.4 — beyan-sonra-ölç disiplini).
+run:
+  scenario: "A"
+  name: "Duman testi — Kentsel + TA Var (küçük)"
+  seed: 42
+
+morphology: "urban"
+
+area:
+  origin_lat: 38.6748
+  origin_lon: 39.2225
+  radius_km: 5
+
+simulation:
+  agents: 100                       # 1000 → 100
+  duration_days: 3                  # 30 → 3  (864 tick/ajan)
+  tick_minutes: 5
+
+network:
+  sites_min: 100
+  sites_max: 150
+  rx_sensitivity_dbm: -110
+
+radio:
+  shadowing_sigma_db: 7
+  d_max_km: 5
+
+timing_advance:
+  enabled: true
+  technology: "LTE"
+
+analysis:
+  grid_resolution_m: 50
+  contour_levels: [0.50, 0.90, 0.95]
+  neighbor_max_count: 8
+  sample:
+    calibration_events: 200
+    validation_events: 200
+
+calibration:
+  split_ratio: 0.80
+  lambda_min: 0.5
+  lambda_max: 3.0
+  target_coverage: 0.90
+  tolerance: 0.005
+  max_iterations: 12
+
+integrity:
+  max_velocity_kmh: 300
+  injection_rate: 0.02
+  rule_weights: {1: 0.2, 2: 0.2, 3: 0.2, 4: 0.2, 5: 0.2}
+  detection:                        # ADR-27..31 (Sprint 6) — tespit tarafı
+    velocity_margin_cap: 1.0e6      # ADR-31: Δt=0 → sonsuz hız; margin kapılır
+    time_backstep_tolerance_s: 0    # ADR-29: katı karşılaştırma, tick-içi eşitlik ihlal değil
+    activity_min_support: 2         # ADR-27: modal IMEI referansı için asgari destek
+    min_findings_for_threshold: 30  # ADR-31: K7 ölçülebilirlik kuralı
+
+privacy:
+  k_anonymity: 5
+  hmac_salt_env: "HMAC_SALT"
+
+api:
+  max_geometries_per_request: 500

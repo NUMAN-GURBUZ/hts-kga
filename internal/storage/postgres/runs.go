@@ -95,6 +95,11 @@ type RunStatus struct {
 	FinishedAt      *time.Time
 	PublishedEvents *int64
 	AnalyzedEvents  *int64
+	// InspectedRecords, bütünlük akış fazının incelediği kayıt sayısıdır
+	// (ADR-31/7). NULL = S4 bu koşuda koşmadı.
+	InspectedRecords *int64
+	// Morphology, senaryo profilidir (ADR-17).
+	Morphology string
 }
 
 // Finished, simülasyonun tamamlanıp tamamlanmadığını bildirir.
@@ -104,12 +109,12 @@ func (s RunStatus) Finished() bool { return s.FinishedAt != nil }
 func (p *Pool) RunStatusOf(ctx context.Context, runID uuid.UUID) (RunStatus, error) {
 	var s RunStatus
 	err := p.pool.QueryRow(ctx, `
-        SELECT run_id, scenario, seed, lambda, started_at, finished_at,
-               published_events, analyzed_events
+        SELECT run_id, scenario, morphology, seed, lambda, started_at, finished_at,
+               published_events, analyzed_events, inspected_records
           FROM run_config
          WHERE run_id = $1::uuid`, runID.String()).
-		Scan(&s.RunID, &s.Scenario, &s.Seed, &s.Lambda, &s.StartedAt, &s.FinishedAt,
-			&s.PublishedEvents, &s.AnalyzedEvents)
+		Scan(&s.RunID, &s.Scenario, &s.Morphology, &s.Seed, &s.Lambda, &s.StartedAt, &s.FinishedAt,
+			&s.PublishedEvents, &s.AnalyzedEvents, &s.InspectedRecords)
 	if err != nil {
 		return RunStatus{}, fmt.Errorf("koşu durumu okunamadı (%s): %w", runID, err)
 	}

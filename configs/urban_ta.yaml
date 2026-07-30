@@ -50,6 +50,11 @@ integrity:
   max_velocity_kmh: 300
   injection_rate: 0.02              # ADR-09
   rule_weights: {1: 0.2, 2: 0.2, 3: 0.2, 4: 0.2, 5: 0.2}
+  detection:                        # ADR-27..31 (Sprint 6) — tespit tarafı
+    velocity_margin_cap: 1.0e6      # ADR-31: Δt=0 → sonsuz hız; margin kapılır
+    time_backstep_tolerance_s: 0    # ADR-29: katı karşılaştırma, tick-içi eşitlik ihlal değil
+    activity_min_support: 2         # ADR-27: modal IMEI referansı için asgari destek
+    min_findings_for_threshold: 30  # ADR-31: K7 ölçülebilirlik kuralı
 
 privacy:
   k_anonymity: 5                    # yalnızca aggregate uçlar

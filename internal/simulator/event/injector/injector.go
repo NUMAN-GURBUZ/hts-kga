@@ -36,52 +36,41 @@ import (
 
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/simulator/event"
 	"github.com/NUMAN-GURBUZ/hts-kga/pkg/geo"
+	"github.com/NUMAN-GURBUZ/hts-kga/pkg/integrityrule"
 )
 
 // Rule, manipülasyon kuralıdır (ground_truth.injected_rule).
-type Rule int
+//
+// Tanım `pkg/integrityrule`'dadır ve buradaki isimler o kimliklerin enjeksiyon
+// tarafındaki adlarıdır. Kimlikler iki yerde ayrı tanımlansaydı bir
+// numaralandırma değişikliği derleme hatası vermez, sessizce F.5'in
+// `g.injected_rule = f.rule_id` eşleşmesini bozardı (T-E05-00).
+type Rule = integrityrule.ID
 
 const (
 	// RuleFakeCell, envanterde bulunmayan bir hücre kimliği yazar.
 	// S6 karşılığı: envanter kuralı.
-	RuleFakeCell Rule = 1
+	RuleFakeCell = integrityrule.Inventory
 	// RuleJump, kaydı çok uzaktaki bir hücreye taşır.
 	// S6 karşılığı: hız kuralı (max_velocity_kmh).
-	RuleJump Rule = 2
+	RuleJump = integrityrule.Velocity
 	// RuleTime, zaman damgasını geriye kaydırır.
 	// S6 karşılığı: zaman kuralı.
-	RuleTime Rule = 3
+	RuleTime = integrityrule.TimeOrder
 	// RuleGap, kaydı tamamen siler (yalnızca ground truth kalır).
 	// S6 karşılığı: yörünge kuralı (eksik halka).
-	RuleGap Rule = 4
+	RuleGap = integrityrule.Trajectory
 	// RuleDeviceSwap, cihaz takma adını başka bir cihazla değiştirir.
 	// S6 karşılığı: aktivite kuralı.
-	RuleDeviceSwap Rule = 5
+	RuleDeviceSwap = integrityrule.Activity
 )
 
-// AllRules, tanımlı kuralların artan sıralı listesidir.
-var AllRules = [...]Rule{RuleFakeCell, RuleJump, RuleTime, RuleGap, RuleDeviceSwap}
-
-// Valid, kuralın tanımlı olup olmadığını bildirir.
-func (r Rule) Valid() bool { return r >= RuleFakeCell && r <= RuleDeviceSwap }
-
-// String, kuralın okunabilir adını döndürür.
-func (r Rule) String() string {
-	switch r {
-	case RuleFakeCell:
-		return "sahte hücre"
-	case RuleJump:
-		return "atlama"
-	case RuleTime:
-		return "zaman"
-	case RuleGap:
-		return "kayıt boşluğu"
-	case RuleDeviceSwap:
-		return "cihaz değişimi"
-	default:
-		return fmt.Sprintf("Rule(%d)", int(r))
-	}
-}
+// AllRules, tanımlı kuralların artan **kimlik** sıralı listesidir.
+//
+// Kimlik sırası burada determinizmin parçasıdır: kümülatif ağırlık tablosu bu
+// sırada kurulur ve aynı tekdüze sayı aynı kuralı seçer. Öncelik sırası
+// (integrityrule.All) tespit tarafına aittir ve buraya karıştırılmamalıdır.
+var AllRules = integrityrule.ByID
 
 // CellRef, enjeksiyonun ihtiyaç duyduğu en küçük hücre görünümüdür.
 type CellRef struct {

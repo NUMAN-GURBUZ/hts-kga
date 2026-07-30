@@ -43,12 +43,32 @@ services:
       # KRaft zorunlu değişkenleri
       KAFKA_NODE_ID:                          1
       KAFKA_PROCESS_ROLES:                    broker,controller
-      KAFKA_LISTENERS:                        PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS:             PLAINTEXT://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:   PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      # ADR-32: SASL_PLAINTEXT + SCRAM-SHA-256 + StandardAuthorizer.
+      # Kör testin 1. katmanı buna dayanır: PLAINTEXT'te her bağlantı
+      # ANONYMOUS principal'ıdır ve `User:svc_analysis` diye bir özne yoktur,
+      # dolayısıyla ona uygulanacak bir yasak da yoktur.
+      # Üç dinleyici (ADR-32/1):
+      #   SASL://:9092     yayınlanır — tüm servis istemcileri, SCRAM kimlikli
+      #   INTERNAL://:9094 yayınlanmaz — broker'lar arası + kurulum CLI'ı
+      #   CONTROLLER://:9093 yayınlanmaz — KRaft quorum
+      KAFKA_LISTENERS:                        SASL://:9092,INTERNAL://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS:             SASL://localhost:9092,INTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:   SASL:SASL_PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES:        CONTROLLER
       KAFKA_CONTROLLER_QUORUM_VOTERS:         1@localhost:9093
-      KAFKA_INTER_BROKER_LISTENER_NAME:       PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME:       INTERNAL
+      KAFKA_SASL_ENABLED_MECHANISMS:          SCRAM-SHA-256
+      # Yetkilendirme (ADR-32/2). Kafka'nın varsayılanı
+      # `allow.everyone.if.no.acl.found=false`: ACL yoksa REDDET.
+      # svc_analysis ve svc_integrity için hts.groundtruth üzerinde hiçbir
+      # kayıt yoktur — yasak, DENY kuralıyla değil yetki vermeyerek kurulur.
+      KAFKA_AUTHORIZER_CLASS_NAME:            org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      # Süper kullanıcı yalnızca yayınlanmayan 9094'ten ulaşılabilir (ADR-32/3).
+      KAFKA_SUPER_USERS:                      User:ANONYMOUS
+      # SASL sunucu tarafı bildirimi. Dosyada parola YOKTUR: SCRAM'da sunucu,
+      # istemci parolalarını doğrulamak için sırra ihtiyaç duymaz — tuzlanmış
+      # karmalar broker meta verisindedir.
+      KAFKA_OPTS: -Djava.security.auth.login.config=/etc/kafka/jaas/broker_jaas.conf
       # Performans / güvenilirlik
       KAFKA_LOG_RETENTION_HOURS:              168       # 7 gün — simülasyon süresi + marj
       KAFKA_AUTO_CREATE_TOPICS_ENABLE:        "false"   # topic'ler make seed-kafka ile oluşturulur
@@ -61,8 +81,12 @@ services:
       - "9092:9092"
     volumes:
       - kafka_data:/var/lib/kafka/data
+      - ./kafka:/etc/kafka/jaas:ro
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      # Sağlık denetimi iç porttan yapılır: SASL kimlikleri broker ayağa
+      # kalktıktan sonra yazılır (make seed-kafka), dolayısıyla 9092 ilk
+      # açılışta henüz kimlik doğrulayamaz.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9094 >/dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 10
