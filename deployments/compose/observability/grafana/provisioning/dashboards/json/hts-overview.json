@@ -1,0 +1,82 @@
+{
+  "title": "HTS-KGA — Genel Bakış",
+  "uid": "hts-kga-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "15s",
+  "tags": ["hts-kga", "T-E09"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Servis ayakta mı (Prometheus scrape)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "up{job=~\"hts-.*\"}", "legendFormat": "{{job}}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "down", "color": "red" }, "1": { "text": "up", "color": "green" } } }
+          ]
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Kafka consumer lag (partition başına)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "hts_kafka_consumer_lag", "legendFormat": "{{group}} · {{topic}}[{{partition}}]", "refId": "A" }
+      ],
+      "description": "T-E09 'lag' gereksinimi (ADR-34/2). Sıfıra yakın olmalı; sürekli artış tüketicinin üretime yetişemediğini gösterir."
+    },
+    {
+      "id": 3,
+      "title": "Kafka mesaj yayın hızı (topic başına, olay/sn)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        { "expr": "rate(hts_kafka_messages_published_total[1m])", "legendFormat": "{{topic}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Analiz motoru — olay işleme hızı (sonuca göre)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "rate(hts_analysis_events_processed_total[1m])", "legendFormat": "{{outcome}}", "refId": "A" }
+      ],
+      "description": "K9 ölçümünde replika sayısına göre bu eğrinin dikliği karşılaştırılır."
+    },
+    {
+      "id": 5,
+      "title": "Bütünlük motoru — faz sonu sayaçları",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "hts_integrity_records_total", "legendFormat": "{{phase}} · {{outcome}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Gateway — istek hızı (uç ve sonuca göre)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "targets": [
+        { "expr": "rate(hts_gateway_requests_total[1m])", "legendFormat": "{{action}} · {{outcome}}", "refId": "A" }
+      ]
+    }
+  ]
+}

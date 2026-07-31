@@ -54,6 +54,7 @@ import (
 const (
 	serviceName    = "hts-gateway"
 	serviceVersion = "0.7.0-sprint7"
+	metricsAddr    = ":2116" // prometheus.yml: hts-gateway hedefi
 )
 
 func main() {
@@ -102,6 +103,7 @@ func execute() error {
 	h := health.New(serviceName, serviceVersion)
 	h.Register("postgres", pool.Ping)
 	go h.MustServe(envOr("HTS_HEALTH_ADDR", ":8086"))
+	go prov.MustServeMetrics(envOr("HTS_METRICS_ADDR", metricsAddr))
 
 	staticDir := envOr("HTS_STATIC_DIR", "./web")
 	restSrv, err := rest.New(rest.Config{

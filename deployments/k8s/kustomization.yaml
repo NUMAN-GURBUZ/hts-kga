@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: hts-kga
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployment-analysis-engine.yaml
+  - deployment-integrity.yaml
+  - deployment-gateway.yaml
+  - hpa-analysis-engine.yaml
+  - job-simulator.yaml
+  - job-validation.yaml
+# secret-example.yaml BİLİNÇLİ OLARAK dahil edilmemiştir — bkz. README.

@@ -52,6 +52,7 @@ const (
 	serviceName    = "hts-analysis-engine"
 	serviceVersion = "0.4.0-sprint4"
 	healthAddr     = ":8082"
+	metricsAddr    = ":2113" // prometheus.yml: hts-analysis-engine hedefi
 	consumerGroup  = "hts-analysis-engine"
 )
 
@@ -80,6 +81,7 @@ func run() error {
 
 	h := health.New(serviceName, serviceVersion)
 	go h.MustServe(healthAddr)
+	go prov.MustServeMetrics(envOr("HTS_METRICS_ADDR", metricsAddr))
 
 	scn, runID, lambda, err := loadSettings()
 	if err != nil {

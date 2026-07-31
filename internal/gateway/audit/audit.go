@@ -90,6 +90,7 @@ func (l *Logger) Record(ctx context.Context, e Entry) {
 		l.log.Error("denetim satırı eksik alanla atlandı",
 			"action", e.Action, "resource", e.Resource)
 		l.dropped.Add(1)
+		requestsTotal.Add(ctx, 1, actionAttrs(e.Action, "dropped"))
 		return
 	}
 
@@ -99,6 +100,7 @@ func (l *Logger) Record(ctx context.Context, e Entry) {
 		if err != nil {
 			l.log.Error("denetim ayrıntısı serileştirilemedi", "action", e.Action, "hata", err)
 			l.dropped.Add(1)
+			requestsTotal.Add(ctx, 1, actionAttrs(e.Action, "dropped"))
 			return
 		}
 		detail = encoded
@@ -119,9 +121,11 @@ func (l *Logger) Record(ctx context.Context, e Entry) {
 		l.log.Error("denetim satırı yazılamadı — istek yine de servis edildi",
 			"action", e.Action, "resource", e.Resource, "hata", err)
 		l.dropped.Add(1)
+		requestsTotal.Add(ctx, 1, actionAttrs(e.Action, "dropped"))
 		return
 	}
 	l.written.Add(1)
+	requestsTotal.Add(ctx, 1, actionAttrs(e.Action, "written"))
 }
 
 // Written, yazılan denetim satırı sayısıdır.

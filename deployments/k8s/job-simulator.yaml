@@ -1,0 +1,40 @@
+# Simülatör ve doğrulama uzun ömürlü servisler DEĞİLDİR (bir koşuyu
+# işleyip çıkarlar) — Deployment değil Job olarak modellenir.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: simulator
+  namespace: hts-kga
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: simulator
+          image: hts-kga/simulator:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: hts-kga-config
+            - secretRef:
+                name: hts-kga-secrets
+          env:
+            - name: KAFKA_SASL_USER
+              value: "svc_simulator"
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hts-kga-secrets
+                  key: KAFKA_PW_SIMULATOR
+          volumeMounts:
+            - name: scenarios
+              mountPath: /configs
+              readOnly: true
+          resources:
+            requests: { cpu: "500m", memory: "512Mi" }
+            limits: { cpu: "2", memory: "1Gi" }
+      volumes:
+        - name: scenarios
+          configMap:
+            name: hts-kga-scenarios

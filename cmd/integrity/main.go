@@ -61,6 +61,7 @@ import (
 const (
 	serviceName    = "hts-integrity"
 	serviceVersion = "0.6.0-sprint6"
+	metricsAddr    = ":2115" // prometheus.yml: hts-integrity hedefi
 )
 
 func main() {
@@ -109,6 +110,7 @@ func execute() error {
 
 	h := health.New(serviceName, serviceVersion)
 	go h.MustServe(envOr("HTS_HEALTH_ADDR", ":8085"))
+	go prov.MustServeMetrics(envOr("HTS_METRICS_ADDR", metricsAddr))
 
 	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -227,6 +229,7 @@ func runStream(ctx context.Context, d streamDeps) error {
 
 	runErr := stream.Run(ctx)
 	st := engine.Stats()
+	recordStats(context.WithoutCancel(ctx), "stream", st)
 
 	// Tamlık sayacı, akış hata verse bile yazılır: yarım koşu FAIL olarak
 	// görünmelidir, hiç yazılmaması SKIP verir ve sorunu gizler (ADR-31/7).
@@ -342,6 +345,7 @@ func runBatch(ctx context.Context, d batchDeps) error {
 	}
 
 	st := engine.Stats()
+	recordStats(context.WithoutCancel(ctx), "batch", st)
 	if st.Invalid > 0 {
 		slog.Error("geçerlilik denetiminden düşen isabet var — bulgular eksik", "adet", st.Invalid)
 	}

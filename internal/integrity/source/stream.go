@@ -22,10 +22,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/integrity/detector"
 	"github.com/NUMAN-GURBUZ/hts-kga/pkg/htswire"
 	"github.com/NUMAN-GURBUZ/hts-kga/pkg/kafka"
 )
+
+// tracer, üreticinin span'ine bağlanan tüketici span'lerini açar (O-05).
+var tracer = otel.Tracer("github.com/NUMAN-GURBUZ/hts-kga/internal/integrity/source")
+
+// meter, consumer lag ölçerini kaydeden OTel meter'dır (ADR-34/2).
+var meter = otel.Meter("github.com/NUMAN-GURBUZ/hts-kga/internal/integrity/source")
 
 // StreamConfig, akış tüketicisinin kurulum parametreleridir.
 type StreamConfig struct {
@@ -95,6 +105,9 @@ func NewStream(cfg StreamConfig, engine *detector.Engine) (*Stream, error) {
 	if log == nil {
 		log = slog.Default()
 	}
+	if err := kafka.RegisterLagGauge(meter, client, cfg.Group); err != nil {
+		log.Warn("kafka lag ölçer kaydedilemedi", "hata", err)
+	}
 	return &Stream{
 		client: client, engine: engine, runID: cfg.RunID,
 		idle: cfg.IdleTimeout, seen: time.Now(), log: log,
@@ -142,6 +155,14 @@ func (s *Stream) Run(ctx context.Context) error {
 				return
 			}
 			msgCtx := kafka.Propagator().Extract(ctx, kafka.NewHeaderCarrier(&msg.Headers))
+			msgCtx, span := tracer.Start(msgCtx, "kafka.consume",
+				trace.WithSpanKind(trace.SpanKindConsumer),
+				trace.WithAttributes(
+					attribute.String("messaging.destination.name", msg.Topic),
+					attribute.Int64("messaging.kafka.partition", int64(msg.Partition)),
+					attribute.Int64("messaging.kafka.offset", msg.Offset),
+				))
+			defer span.End()
 
 			rec, err := htswire.DecodeRecord(msg.Value)
 			if err != nil {

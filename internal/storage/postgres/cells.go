@@ -250,8 +250,11 @@ func (a *cellArrays) set(i int, r CellRow) error {
 // ihtiyaçtır. `svc_integrity` rolünün `cells` üzerinde SELECT yetkisi vardır
 // (migration 004), ek yetki gerekmez.
 //
-// Sıra kimliğe göredir: envanterin bellek düzeni koşudan koşuya aynı olmalıdır
-// (K10).
+// Sıra konuma göredir (ADR-35): envanterin bellek düzeni koşudan koşuya aynı
+// olmalıdır (K10). `cell_id` BİLİNÇLİ OLARAK run_id içerir (ADR-05, DB
+// birincil anahtar çakışmasını önler); ona göre sıralamak aynı fiziksel
+// hücrenin aynı seed'le bile iki koşuda farklı sırada toplanmasına yol açardı
+// — konum run_id'den bağımsızdır.
 func (p *Pool) SelectCellLocations(ctx context.Context, runID uuid.UUID) ([]CellRow, error) {
 	rows, err := p.pool.Query(ctx, `
         SELECT cell_id, run_id, r_max_m,
@@ -259,7 +262,7 @@ func (p *Pool) SelectCellLocations(ctx context.Context, runID uuid.UUID) ([]Cell
                ST_X(location::geometry) AS lon
           FROM cells
          WHERE run_id = $1::uuid
-         ORDER BY cell_id`, runID.String())
+         ORDER BY lat, lon`, runID.String())
 	if err != nil {
 		return nil, fmt.Errorf("hücre konumları okunamadı (%s): %w", runID, err)
 	}

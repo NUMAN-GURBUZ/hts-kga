@@ -1,0 +1,21 @@
+# Sır olmayan bağlantı ayarları. POSTGRES_HOST/KAFKA_BROKERS/REDIS_ADDR
+# öntanımlı olarak kümenin DIŞINDaki altyapıyı gösterir (ADR-16: bu proje
+# PostgreSQL/Kafka/Redis'i K8s'te çalıştırmaz — Compose'daki gibi ayrı
+# tutulur). Kendi ortamınıza göre değiştirin.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hts-kga-config
+  namespace: hts-kga
+data:
+  POSTGRES_HOST: "postgres.example.internal"
+  POSTGRES_PORT: "5432"
+  KAFKA_BROKERS: "kafka.example.internal:9092"
+  REDIS_ADDR: "redis.example.internal:6379"
+  HTS_CONFIG: "/configs/urban_ta.yaml"
+---
+# Senaryo YAML'ları — gerçek dağıtımda:
+#   kubectl create configmap hts-kga-scenarios \
+#     --from-file=configs/ -n hts-kga
+# Burada yalnızca bir tanesi örnek olarak taşınır; tamamı repo'daki
+# configs/ dizinindedir (kaynak-of-truth budur, bu dosya değil).

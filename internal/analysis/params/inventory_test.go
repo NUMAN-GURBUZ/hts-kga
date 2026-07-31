@@ -109,10 +109,14 @@ func TestLoad_AdaptsRedisRecords(t *testing.T) {
 	}
 }
 
-// TestLoad_StableOrder, envanterin kimliğe göre kararlı sıralandığını sınar.
+// TestLoad_StableOrder, envanterin fiziksel konuma göre kararlı
+// sıralandığını sınar.
 //
 // K10 için gereklidir: kaynak sırası değişse bile kütle toplamının kayan
-// nokta sırası değişmemelidir.
+// nokta sırası değişmemelidir. Kimliğe göre sıralanmaz (ADR-35): cell_id
+// bilinçli olarak run_id içerir (ADR-05) ve ona göre sıralamak K10'u
+// bozardı — iki çağrı burada bilerek FARKLI run_id kullanıyor (`uuid.New()`)
+// ki sıranın kimlikten değil konum+azimuttan geldiği doğrulansın.
 func TestLoad_StableOrder(t *testing.T) {
 	forward := []redis.CellParams{
 		cellParams(1, originLat, originLon, "UMa"),
@@ -130,15 +134,19 @@ func TestLoad_StableOrder(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
+	// Aynı fiziksel hücre iki farklı run_id altında farklı cell_id taşır;
+	// bu yüzden kimlik değil azimut (bu fixture'da konum sabit, azimut
+	// hücreyi ayırt eden tek fiziksel özellik) karşılaştırılır.
 	for i := range a.Cells() {
-		if a.Cells()[i].ID != b.Cells()[i].ID {
-			t.Fatalf("sıra kaynağa bağlı: %d. hücre %s vs %s",
-				i, a.Cells()[i].ID, b.Cells()[i].ID)
+		if a.Cells()[i].AzimuthDeg != b.Cells()[i].AzimuthDeg {
+			t.Fatalf("sıra kaynağa bağlı: %d. hücre azimut %g vs %g",
+				i, a.Cells()[i].AzimuthDeg, b.Cells()[i].AzimuthDeg)
 		}
 	}
 	for i := 1; i < a.Len(); i++ {
-		if a.Cells()[i-1].ID.String() >= a.Cells()[i].ID.String() {
-			t.Fatalf("sıra artan değil: %s ≥ %s", a.Cells()[i-1].ID, a.Cells()[i].ID)
+		if a.Cells()[i-1].AzimuthDeg >= a.Cells()[i].AzimuthDeg {
+			t.Fatalf("sıra artan değil: azimut %g ≥ %g",
+				a.Cells()[i-1].AzimuthDeg, a.Cells()[i].AzimuthDeg)
 		}
 	}
 }

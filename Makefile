@@ -181,6 +181,15 @@ verify-k7: ## K7 ölçümünü göster (integrity_metrics) — RUN_ID=...
 		  FROM integrity_metrics WHERE run_id = '$(RUN_ID)' ORDER BY rule_id;"
 
 # ==============================================================================
+# Tekrarlanabilirlik — Sprint 8 (ADR-34/K10, ADR-35)
+# ==============================================================================
+
+.PHONY: verify-k10
+
+verify-k10: ## K10 ölçümünü göster — RUN_A=... RUN_B=... (aynı seed, iki run_id)
+	@bash scripts/verify-k10.sh $(RUN_A) $(RUN_B)
+
+# ==============================================================================
 # API Gateway — Sprint 7 (E06/E07, ADR-12, ADR-13, ADR-33)
 # ==============================================================================
 

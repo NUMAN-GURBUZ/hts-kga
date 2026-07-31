@@ -40,6 +40,7 @@ import (
 const (
 	serviceName    = "hts-validation"
 	serviceVersion = "0.5.0-sprint5"
+	metricsAddr    = ":2114" // prometheus.yml: hts-validation hedefi
 )
 
 func main() {
@@ -64,6 +65,7 @@ func execute() error {
 		return fmt.Errorf("OTel başlatılamadı: %w", err)
 	}
 	defer func() { _ = prov.Shutdown(context.Background()) }()
+	go prov.MustServeMetrics(envOr("HTS_METRICS_ADDR", metricsAddr))
 
 	scn, runID, err := loadSettings()
 	if err != nil {

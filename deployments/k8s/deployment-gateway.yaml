@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: hts-kga
+  labels:
+    app: gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: hts-kga/gateway:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: hts-kga-config
+          env:
+            # svc_gateway rolü (ADR-33/2): ground_truth erişimi YOK.
+            - name: POSTGRES_USER
+              value: "svc_gateway"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hts-kga-secrets
+                  key: GATEWAY_DB_PASSWORD
+          ports:
+            - name: rest
+              containerPort: 8080
+            - name: grpc
+              containerPort: 50051
+            - name: health
+              containerPort: 8086
+            - name: metrics
+              containerPort: 2116
+          livenessProbe:
+            httpGet: { path: /health, port: health }
+            initialDelaySeconds: 5
+          readinessProbe:
+            httpGet: { path: /ready, port: health }
+            initialDelaySeconds: 5
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: hts-kga
+spec:
+  selector:
+    app: gateway
+  ports:
+    - name: rest
+      port: 8080
+      targetPort: rest
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+  type: ClusterIP

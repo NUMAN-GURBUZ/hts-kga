@@ -7,7 +7,29 @@ import (
 	"fmt"
 
 	"github.com/twmb/franz-go/pkg/kgo"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
+
+// tracer, üretici span'lerini açan OTel tracer'ıdır (O-05, ADR-34/2-3).
+var tracer = otel.Tracer("github.com/NUMAN-GURBUZ/hts-kga/pkg/kafka")
+
+// meter, yayınlanan mesaj sayacını tutar (ADR-34/2).
+var meter = otel.Meter("github.com/NUMAN-GURBUZ/hts-kga/pkg/kafka")
+
+var messagesPublished = mustCounter(meter, "hts_kafka_messages_published_total",
+	"Topic başına yayınlanan Kafka mesajı sayısı")
+
+func mustCounter(m metric.Meter, name, desc string) metric.Int64Counter {
+	c, err := m.Int64Counter(name, metric.WithDescription(desc))
+	if err != nil {
+		panic("otel sayaç: " + err.Error())
+	}
+	return c
+}
 
 // Topic adları (plan C.2, scripts/kafka-setup.sh ile birebir).
 const (
@@ -77,10 +99,17 @@ func (p *Producer) Publish(ctx context.Context, messages ...Message) error {
 		return nil
 	}
 
+	ctx, span := tracer.Start(ctx, "kafka.publish",
+		trace.WithSpanKind(trace.SpanKindProducer),
+		trace.WithAttributes(attribute.Int("messaging.batch.message_count", len(messages))))
+	defer span.End()
+
 	records := make([]*kgo.Record, len(messages))
 	for i, m := range messages {
 		if m.Topic == "" {
-			return fmt.Errorf("kafka yayını: mesaj[%d] topic'siz", i)
+			err := fmt.Errorf("kafka yayını: mesaj[%d] topic'siz", i)
+			span.RecordError(err)
+			return err
 		}
 		rec := &kgo.Record{Topic: m.Topic, Key: m.Key, Value: m.Value}
 		propagator.Inject(ctx, NewHeaderCarrier(&rec.Headers))
@@ -89,7 +118,17 @@ func (p *Producer) Publish(ctx context.Context, messages ...Message) error {
 
 	results := p.client.ProduceSync(ctx, records...)
 	if err := results.FirstErr(); err != nil {
-		return fmt.Errorf("kafka yayını (%d mesaj): %w", len(messages), err)
+		err = fmt.Errorf("kafka yayını (%d mesaj): %w", len(messages), err)
+		span.RecordError(err)
+		return err
+	}
+
+	byTopic := make(map[string]int64, 2)
+	for _, m := range messages {
+		byTopic[m.Topic]++
+	}
+	for topic, n := range byTopic {
+		messagesPublished.Add(ctx, n, metric.WithAttributes(attribute.String("topic", topic)))
 	}
 	return nil
 }

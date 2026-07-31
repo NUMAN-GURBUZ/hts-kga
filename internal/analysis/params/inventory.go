@@ -157,11 +157,22 @@ func build(raw []redis.CellParams, projector *geo.Projector) (*Inventory, error)
 		}
 	}
 
-	// Kimliğe göre kararlı sıra: kayan nokta toplama sırası koşudan koşuya
-	// değişmesin (K10). ScanCells zaten sıralı döndürür; burada garanti
-	// kaynaktan bağımsız hâle gelir.
+	// Fiziksel konuma göre kararlı sıra (ADR-35): kayan nokta toplama sırası
+	// koşudan koşuya değişmesin (K10). `cell.ID` (cells.cell_id) BİLİNÇLİ
+	// OLARAK run_id içerir (ADR-05, DB birincil anahtar çakışmasını önler);
+	// ona göre sıralamak "kaynaktan bağımsız" sonucun TAM TERSİNİ verir —
+	// aynı fiziksel hücre, aynı seed'le bile iki koşuda farklı sırada
+	// toplanır. Site konumu + azimut run_id'den bağımsızdır ve toplam bir
+	// sıra tanımlar (aynı sitenin iki sektörü aynı azimutu paylaşamaz).
 	sort.Slice(inv.cells, func(i, j int) bool {
-		return inv.cells[i].ID.String() < inv.cells[j].ID.String()
+		a, b := inv.cells[i], inv.cells[j]
+		if a.Site.X != b.Site.X {
+			return a.Site.X < b.Site.X
+		}
+		if a.Site.Y != b.Site.Y {
+			return a.Site.Y < b.Site.Y
+		}
+		return a.AzimuthDeg < b.AzimuthDeg
 	})
 	for i := range inv.cells {
 		inv.index[inv.cells[i].ID] = i

@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: integrity
+  namespace: hts-kga
+  labels:
+    app: integrity
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: integrity
+  template:
+    metadata:
+      labels:
+        app: integrity
+    spec:
+      containers:
+        - name: integrity
+          image: hts-kga/integrity:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: hts-kga-config
+            - secretRef:
+                name: hts-kga-secrets
+          env:
+            - name: HTS_INTEGRITY_MODE
+              value: "stream"
+            - name: KAFKA_SASL_USER
+              value: "svc_integrity"
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hts-kga-secrets
+                  key: KAFKA_PW_INTEGRITY
+            - name: HTS_RUN_ID
+              value: "00000000-0000-0000-0000-000000000000"
+          ports:
+            - name: health
+              containerPort: 8085
+            - name: metrics
+              containerPort: 2115
+          volumeMounts:
+            - name: scenarios
+              mountPath: /configs
+              readOnly: true
+          livenessProbe:
+            httpGet: { path: /health, port: health }
+            initialDelaySeconds: 5
+          readinessProbe:
+            httpGet: { path: /ready, port: health }
+            initialDelaySeconds: 5
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+      volumes:
+        - name: scenarios
+          configMap:
+            name: hts-kga-scenarios
