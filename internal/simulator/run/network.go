@@ -40,7 +40,13 @@ func buildNetwork(inv *inventory.Inventory) (*radio.Network, error) {
 		index[s.ID.String()] = len(sites)
 		sites = append(sites, radio.Site{
 			Source: radio.Source{
-				Key: radio.SourceKey(s.ID),
+				// AxialKey — run_id'den bağımsız (ADR-35). s.ID (UUID)
+				// bilinçli olarak run_id içerir (ADR-05, DB birincil anahtar
+				// çakışmasını önler) ve gölgeleme/LOS anahtarı için
+				// KULLANILMAMALIDIR — kullanılırsa aynı fiziksel site aynı
+				// seed'le bile koşudan koşuya farklı gölgeleme alır ve K10
+				// kırılır.
+				Key: radio.AxialKey(s.Axial.Q, s.Axial.R),
 				ENU: s.ENU,
 			},
 		})

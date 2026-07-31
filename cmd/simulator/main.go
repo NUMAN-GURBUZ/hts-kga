@@ -44,6 +44,7 @@ const (
 	serviceName    = "hts-simulator"
 	serviceVersion = "0.5.0-sprint5"
 	healthAddr     = ":8081"
+	metricsAddr    = ":2112" // prometheus.yml: hts-simulator hedefi
 )
 
 // runStartAnchor, tick 0'ın takvim karşılığıdır.
@@ -77,6 +78,7 @@ func execute() error {
 
 	h := health.New(serviceName, serviceVersion)
 	go h.MustServe(healthAddr)
+	go prov.MustServeMetrics(envOr("HTS_METRICS_ADDR", metricsAddr))
 
 	// ─── Yapılandırma ────────────────────────────────────────────────────────
 	path := os.Getenv("HTS_CONFIG")

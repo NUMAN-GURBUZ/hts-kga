@@ -126,10 +126,18 @@ func New(seed int64, cfg Config, cells []CellRef) (*Injector, error) {
 
 	in := &Injector{seed: uint64(seed), cfg: cfg, cells: append([]CellRef(nil), cells...)}
 
-	// Envanter kimliğe göre sıralanır: uzak hücre seçimi koşudan koşuya aynı
-	// olmalıdır (K10).
+	// Envanter fiziksel konuma göre sıralanır (ADR-35): uzak hücre seçimi
+	// koşudan koşuya aynı olmalıdır (K10). `cell.ID` BİLİNÇLİ OLARAK run_id
+	// içerir (ADR-05, DB birincil anahtar çakışmasını önler); ona göre
+	// sıralamak farthestCell'in eşitlik durumunda (birden fazla hücre aynı
+	// maksimum mesafede — simetrik hex yerleşiminde beklenir) hangi hücreyi
+	// seçtiğini run_id'ye bağlardı. Konum run_id'den bağımsızdır.
 	sort.Slice(in.cells, func(i, j int) bool {
-		return in.cells[i].ID.String() < in.cells[j].ID.String()
+		a, b := in.cells[i], in.cells[j]
+		if a.ENU.X != b.ENU.X {
+			return a.ENU.X < b.ENU.X
+		}
+		return a.ENU.Y < b.ENU.Y
 	})
 
 	if err := in.buildRuleTable(); err != nil {

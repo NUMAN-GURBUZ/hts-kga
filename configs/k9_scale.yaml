@@ -1,0 +1,74 @@
+# configs/k9_scale.yaml — K9 ölçekleme ölçümü için amaca özel yük (ADR-34/4)
+#
+# AMAÇ: ölçmek, hattı doğrulamak değil (smoke.yaml'ın tersi).
+#
+# smoke.yaml'ın ~15 katı ölçeğinde: sabit maliyetlerin (Kafka consumer group
+# rebalance, Redis envanter yükleme, 4s boşta-çıkış kuyruğu) toplam süreye
+# oranı smoke.yaml'da ölçümü domine ediyordu (4 replikada replika başına
+# ~150 olay — çoğu zaman bağlantı/rebalance'a gidiyordu). Bu ölçek, sabit
+# maliyeti "verim" ölçümünün gürültüsüne indirger.
+#
+# urban_ta.yaml'ın birebir kopyasıdır (şebeke/radyo/TA/bütünlük parametreleri
+# AYNI); yalnızca ajan sayısı ve süre ölçeklenmiştir.
+run:
+  scenario: "A"
+  name: "K9 ölçekleme ölçümü"
+  seed: 42
+
+morphology: "urban"
+
+area:
+  origin_lat: 38.6748
+  origin_lon: 39.2225
+  radius_km: 5
+
+simulation:
+  agents: 250
+  duration_days: 20
+  tick_minutes: 5
+
+network:
+  sites_min: 100
+  sites_max: 150
+  rx_sensitivity_dbm: -110
+
+radio:
+  shadowing_sigma_db: 7
+  d_max_km: 5
+
+timing_advance:
+  enabled: true
+  technology: "LTE"
+
+analysis:
+  grid_resolution_m: 50
+  contour_levels: [0.50, 0.90, 0.95]
+  neighbor_max_count: 8
+  sample:
+    calibration_events: 200
+    validation_events: 200
+
+calibration:
+  split_ratio: 0.80
+  lambda_min: 0.5
+  lambda_max: 3.0
+  target_coverage: 0.90
+  tolerance: 0.005
+  max_iterations: 12
+
+integrity:
+  max_velocity_kmh: 300
+  injection_rate: 0.02
+  rule_weights: {1: 0.2, 2: 0.2, 3: 0.2, 4: 0.2, 5: 0.2}
+  detection:
+    velocity_margin_cap: 1.0e6
+    time_backstep_tolerance_s: 0
+    activity_min_support: 2
+    min_findings_for_threshold: 30
+
+privacy:
+  k_anonymity: 5
+  hmac_salt_env: "HMAC_SALT"
+
+api:
+  max_geometries_per_request: 500

@@ -103,11 +103,16 @@ func LoadInventory(
 		inv.cells = append(inv.cells, cell)
 	}
 
-	// Kimliğe göre sıralı: envanterin bellek düzeni koşudan koşuya aynı
-	// olmalıdır (K10). ScanCells zaten sıralı döndürüyor; burada da garanti
-	// edilir ki başka bir kaynak takıldığında değişmez korunsun.
+	// Fiziksel konuma göre sıralı (ADR-35): envanterin bellek düzeni koşudan
+	// koşuya aynı olmalıdır (K10). `cell.ID` (cells.cell_id) BİLİNÇLİ OLARAK
+	// run_id içerir (ADR-05); ona göre sıralamak koşudan bağımsızlığın TAM
+	// TERSİNİ verirdi. Konum run_id'den bağımsızdır.
 	sort.Slice(inv.cells, func(i, j int) bool {
-		return inv.cells[i].ID.String() < inv.cells[j].ID.String()
+		a, b := inv.cells[i], inv.cells[j]
+		if a.Position.X != b.Position.X {
+			return a.Position.X < b.Position.X
+		}
+		return a.Position.Y < b.Position.Y
 	})
 	return inv, nil
 }

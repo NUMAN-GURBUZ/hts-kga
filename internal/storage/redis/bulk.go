@@ -103,9 +103,11 @@ func (c *Client) BulkLoadSites(ctx context.Context, runID uuid.UUID, sites []Sit
 // mekânsal bir Redis indeksi kurmaya gerek yoktur — bu boyutta doğrusal
 // tarama, ağ gidiş-dönüşünden ucuzdur.
 //
-// Sonuç cell_id'ye göre sıralı döner. SCAN'in dönüş sırası garantili
-// olmadığından bu sıralama K10 için zorunludur: envanterin bellek düzeni
-// koşudan koşuya değişirse kayan nokta toplama sırası da değişebilir.
+// Sonuç fiziksel konuma göre sıralı döner (ADR-35). SCAN'in dönüş sırası
+// garantili olmadığından bir sıralama K10 için zorunludur — ama cell_id'ye
+// göre sıralamak YANLIŞ olurdu: cell_id bilinçli olarak run_id içerir
+// (ADR-05), bu yüzden aynı fiziksel hücre aynı seed'le bile iki koşuda
+// farklı sırada toplanırdı. Konum run_id'den bağımsızdır.
 func (c *Client) ScanCells(ctx context.Context, runID uuid.UUID) ([]CellParams, error) {
 	if runID == uuid.Nil {
 		return nil, fmt.Errorf("redis hücre taraması: run_id boş (ADR-05)")
@@ -148,7 +150,14 @@ func (c *Client) ScanCells(ctx context.Context, runID uuid.UUID) ([]CellParams, 
 	}
 
 	sort.Slice(cells, func(i, j int) bool {
-		return cells[i].CellID.String() < cells[j].CellID.String()
+		a, b := cells[i], cells[j]
+		if a.Lat != b.Lat {
+			return a.Lat < b.Lat
+		}
+		if a.Lon != b.Lon {
+			return a.Lon < b.Lon
+		}
+		return a.Azimuth < b.Azimuth
 	})
 	return cells, nil
 }

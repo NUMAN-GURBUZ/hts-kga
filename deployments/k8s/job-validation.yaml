@@ -1,0 +1,35 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: validation
+  namespace: hts-kga
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: validation
+          image: hts-kga/validation:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: hts-kga-config
+            - secretRef:
+                name: hts-kga-secrets
+          env:
+            - name: HTS_RUN_ID
+              value: "00000000-0000-0000-0000-000000000000"
+            - name: HTS_INTEGRITY
+              value: "true"
+          volumeMounts:
+            - name: scenarios
+              mountPath: /configs
+              readOnly: true
+          resources:
+            requests: { cpu: "250m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+      volumes:
+        - name: scenarios
+          configMap:
+            name: hts-kga-scenarios

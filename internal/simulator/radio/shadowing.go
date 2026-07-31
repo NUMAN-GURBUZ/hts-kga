@@ -135,12 +135,36 @@ func NewShadowingField(seed int64, utHeightM float64) (*ShadowingField, error) {
 //
 // Ham bayt dizisi alır: radio paketi böylece uuid bağımlılığı taşımaz ve saf
 // hesap katmanı olarak kalır.
+//
+// # Simülasyon şebekesi için KULLANILMAZ (ADR-35)
+//
+// `cells.site_id` bilinçli olarak `run_id` içerir (ADR-05: aynı DB'yi
+// paylaşan koşuların birincil anahtarı çakışmasın). Bu fonksiyon o kimliği
+// olduğu gibi hash'lediği için, ondan üretilen bir Source.Key de run_id'ye
+// bağlı olur — aynı fiziksel site, aynı seed'le bile iki koşuda **farklı**
+// gölgeleme değeri alır ve K10 (tekrarlanabilirlik) kırılır. Gerçek
+// simülasyon şebekesi bunun yerine AxialKey kullanır. SourceKey yalnızca
+// run_id'siz test sabitleri için genel bir "16 bayt → uint64" yardımcısı
+// olarak kalır.
 func SourceKey(id [16]byte) uint64 {
 	hi := uint64(id[0])<<56 | uint64(id[1])<<48 | uint64(id[2])<<40 | uint64(id[3])<<32 |
 		uint64(id[4])<<24 | uint64(id[5])<<16 | uint64(id[6])<<8 | uint64(id[7])
 	lo := uint64(id[8])<<56 | uint64(id[9])<<48 | uint64(id[10])<<40 | uint64(id[11])<<32 |
 		uint64(id[12])<<24 | uint64(id[13])<<16 | uint64(id[14])<<8 | uint64(id[15])
 	return mix64(hi, lo)
+}
+
+// axialSalt, AxialKey'i SourceKey'den ve diğer akışlardan ayıran ayraçtır.
+const axialSalt = 0x51DE511DE511DE51
+
+// AxialKey, bir sitenin hex ızgara konumundan (q, r) run_id'den bağımsız,
+// deterministik bir kaynak anahtarı üretir (ADR-35, K10).
+//
+// Aynı seed aynı yerleşimi verdiği için (T-E02-03/07) axial koordinat,
+// koşular arasında sabit kalan tek site kimliğidir — gölgeleme/LOS'un
+// tekrarlanabilir olması için doğru anahtar budur.
+func AxialKey(q, r int) uint64 {
+	return mix64(mix64(uint64(uint32(int32(q))), uint64(uint32(int32(r)))), axialSalt)
 }
 
 // ─── Ana çözümleme ───────────────────────────────────────────────────────────

@@ -12,11 +12,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/core"
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/sampling"
 	"github.com/NUMAN-GURBUZ/hts-kga/pkg/htswire"
 	"github.com/NUMAN-GURBUZ/hts-kga/pkg/kafka"
 )
+
+// tracer, üreticinin span'ine bağlanan tüketici span'lerini açar (O-05).
+var tracer = otel.Tracer("github.com/NUMAN-GURBUZ/hts-kga/internal/analysis/driver")
 
 // Handler, üretilen kütlenin teslim edileceği yerdir.
 //
@@ -138,6 +145,9 @@ func NewConsumer(cfg ConsumerConfig) (*Consumer, error) {
 	if log == nil {
 		log = slog.Default()
 	}
+	if err := kafka.RegisterLagGauge(meter, client, cfg.Group); err != nil {
+		log.Warn("kafka lag ölçer kaydedilemedi", "hata", err)
+	}
 	return &Consumer{
 		client:  client,
 		engine:  cfg.Engine,
@@ -194,10 +204,19 @@ func (c *Consumer) Run(ctx context.Context) error {
 		var failed int
 		fetches.EachRecord(func(msg *kgo.Record) {
 			msgCtx := kafka.Propagator().Extract(ctx, kafka.NewHeaderCarrier(&msg.Headers))
+			msgCtx, span := tracer.Start(msgCtx, "kafka.consume",
+				trace.WithSpanKind(trace.SpanKindConsumer),
+				trace.WithAttributes(
+					attribute.String("messaging.destination.name", msg.Topic),
+					attribute.Int64("messaging.kafka.partition", int64(msg.Partition)),
+					attribute.Int64("messaging.kafka.offset", msg.Offset),
+				))
+			defer span.End()
 
 			rec, err := htswire.DecodeRecord(msg.Value)
 			if err != nil {
 				failed++
+				eventsTotal.Add(msgCtx, 1, outcomeAttr("decode_error"))
 				c.log.Error("kayıt çözümlenemedi, atlanıyor",
 					"topic", msg.Topic, "partition", msg.Partition, "offset", msg.Offset, "hata", err)
 				return
@@ -205,10 +224,12 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 			if rec.RunID != c.runID {
 				c.foreign++
+				eventsTotal.Add(msgCtx, 1, outcomeAttr("foreign_run"))
 				return
 			}
 			if !c.sampler.Includes(rec.EventID) {
 				c.skipped++
+				eventsTotal.Add(msgCtx, 1, outcomeAttr("sampled_out"))
 				return
 			}
 
@@ -220,6 +241,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 				// yalnızca gerçekten tahmin üretilen olayları saymalıdır,
 				// yoksa bütünlük denetimi (ADR-23) tutmaz.
 				failed++
+				eventsTotal.Add(msgCtx, 1, outcomeAttr("mass_unproducible"))
 				c.log.Warn("kütle üretilemedi, atlanıyor",
 					"event_id", rec.EventID, "cell_id", rec.CellID, "hata", err)
 				return
@@ -227,10 +249,12 @@ func (c *Consumer) Run(ctx context.Context) error {
 
 			if err := c.handler.Handle(msgCtx, rec, result); err != nil {
 				failed++
+				eventsTotal.Add(msgCtx, 1, outcomeAttr("handler_error"))
 				c.log.Error("kütle teslim edilemedi", "event_id", rec.EventID, "hata", err)
 				return
 			}
 			c.analyzed++
+			eventsTotal.Add(msgCtx, 1, outcomeAttr("analyzed"))
 		})
 
 		if flusher, ok := c.handler.(Flusher); ok {
