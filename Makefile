@@ -10,9 +10,23 @@ GOFLAGS    :=
 # Docker Compose kısayolu
 DC         := docker compose -f deployments/compose/docker-compose.yml
 
-# Veritabanı bağlantı bilgileri (.env'den yüklenir)
-include .env
-export
+# ==============================================================================
+# .env koruması — sıfırdan klonlayan biri için (DX)
+#
+# `include .env` .env yoksa Make'i anlaşılmaz bir parse hatasıyla durdururdu
+# ("No rule to make target '.env'"). `help`, `env-init` ve `demo` .env
+# olmadan da çalışabilmeli (env-init'i tam olarak bunun için var); geri kalan
+# her hedef .env'in POSTGRES_*/KAFKA_PW_* değerlerine ihtiyaç duyar, bu yüzden
+# açık ve eyleme geçirilebilir bir hatayla durur.
+# ==============================================================================
+ifeq (,$(wildcard .env))
+  ifneq (,$(filter-out help env-init demo up down,$(MAKECMDGOALS)))
+    $(error .env dosyasi bulunamadi. Once calistirin: make env-init  (ya da elle: cp .env.example .env, sonra HMAC_SALT'i degistirin))
+  endif
+else
+  include .env
+  export
+endif
 
 PGDSN      ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:5432/$(POSTGRES_DB)?sslmode=disable
 
@@ -52,14 +66,47 @@ clean: ## Derlenmiş ikileri temizle
 	rm -f bin/*
 
 # ==============================================================================
+# İlk kurulum — DX (sıfırdan klonlayan biri için)
+# ==============================================================================
+
+.PHONY: env-init check-psql
+
+env-init: ## .env'i .env.example'dan oluşturur, HMAC_SALT'ı otomatik üretir
+	@if [ -f .env ]; then \
+		echo "ℹ️  .env zaten var, dokunulmadı."; \
+	else \
+		cp .env.example .env; \
+		SALT=$$(openssl rand -hex 32 2>/dev/null || head -c32 /dev/urandom | xxd -p | tr -d '\n'); \
+		sed -i.bak "s/^HMAC_SALT=.*/HMAC_SALT=$$SALT/" .env && rm -f .env.bak; \
+		echo "✅ .env oluşturuldu, HMAC_SALT otomatik üretildi (32 bayt, rastgele)."; \
+		echo "   Not: POSTGRES_PASSWORD varsayılan değerle de çalışır ama gerçek bir"; \
+		echo "   dağıtımda değiştirilmelidir. .env asla commit edilmez (.gitignore)."; \
+	fi
+
+check-psql: ## psql (PostgreSQL istemcisi) kurulu mu diye denetler
+	@command -v psql >/dev/null 2>&1 || { \
+		echo "❌ HATA: 'psql' komutu bulunamadı."; \
+		echo ""; \
+		echo "   Bu proje, migration ve doğrulama hedefleri için host'ta kurulu bir"; \
+		echo "   PostgreSQL istemcisine ihtiyaç duyar (sunucu Docker'da çalışıyor,"; \
+		echo "   istemci değil). Kurmak için:"; \
+		echo ""; \
+		echo "     Debian/Ubuntu : sudo apt install postgresql-client"; \
+		echo "     macOS         : brew install libpq && brew link --force libpq"; \
+		echo "     Fedora/RHEL   : sudo dnf install postgresql"; \
+		echo ""; \
+		exit 1; \
+	}
+
+# ==============================================================================
 # Altyapı kurulumu — T-E01-02..08
 # ==============================================================================
 
 .PHONY: infra-up infra-down infra-logs setup
 
-infra-up: ## Docker Compose altyapısını başlat
-	$(DC) up -d
-	@echo "Servisler ayağa kalkıyor, sağlık kontrolü bekleniyor..."
+infra-up: ## Docker Compose altyapısını başlat ve sağlıklı olana kadar bekle
+	$(DC) up -d --wait --wait-timeout 120
+	@echo "✅ Beş servis de sağlıklı."
 	@$(DC) ps
 
 infra-down: ## Altyapıyı durdur (volume'lar korunur)
@@ -78,13 +125,58 @@ setup: infra-up migrate-up seed-kafka ## Tam altyapı kurulumu (T-E01-12)
 	@echo "   Kafka        : localhost:9092"
 	@echo "   Redis        : localhost:6379"
 
+.PHONY: demo
+
+demo: ## TEK KOMUT: .env yoksa oluştur + altyapıyı kur + örnek senaryo koştur
+	@if [ ! -f .env ]; then \
+		echo "→ .env bulunamadı, otomatik oluşturuluyor..."; \
+		$(MAKE) env-init; \
+	fi
+	@echo "→ altyapı kuruluyor (postgres/kafka/redis/prometheus/grafana + migration + kafka ACL)"
+	@$(MAKE) setup
+	@echo ""
+	@echo "→ örnek senaryo koşuluyor (configs/smoke.yaml, ölçülen süre ~1 dakika)"
+	@bash scripts/run-scenario.sh configs/smoke.yaml
+	@echo ""
+	@echo "✅ Demo verisi hazır. Şimdi:"
+	@echo ""
+	@echo "     make gateway"
+	@echo ""
+	@echo "   çalıştırın (ayrı bir terminalde) ve http://localhost:8080/ adresini açın."
+	@echo "   Grafana   : http://localhost:3000 (admin/admin)"
+	@echo "   Prometheus: http://localhost:9090/targets"
+
+.PHONY: up down
+
+up: ## TEK KOMUT: her şeyi kurar + gateway'i arka planda başlatır (make down ile eşleşir)
+	@$(MAKE) demo
+	@$(MAKE) --no-print-directory gateway-stop >/dev/null 2>&1; true
+	@echo ""
+	@echo "→ gateway arka planda başlatılıyor..."
+	@mkdir -p .run
+	@nohup $(GO) run ./cmd/gateway > .run/gateway.log 2>&1 &
+	@sleep 4
+	@if curl -sf -o /dev/null http://localhost:8080/; then \
+		echo "✅ Hazır — http://localhost:8080/  ·  Grafana: http://localhost:3000"; \
+		echo "   Durdurmak için:  make down"; \
+	else \
+		echo "⚠️  Gateway 4 saniyede yanıt vermedi. Günlük:"; \
+		tail -20 .run/gateway.log; \
+	fi
+
+down: ## TEK KOMUT: gateway'i güvenli durdurur (Docker altyapısı ve veriler korunur)
+	@fuser -k -KILL 8080/tcp 8086/tcp 50051/tcp 2116/tcp 2>/dev/null; true
+	@rm -f .run/gateway.pid
+	@echo "✅ Gateway durduruldu. Docker altyapısı ve veriler korunuyor (make up ile devam edin)."
+	@echo "   Altyapıyı da kapatmak isterseniz:  make infra-down"
+
 # ==============================================================================
 # Veritabanı migration — T-E01-05..07
 # ==============================================================================
 
 .PHONY: migrate-up migrate-down migrate-status
 
-migrate-up: ## Tüm migration'ları uygula
+migrate-up: check-psql ## Tüm migration'ları uygula
 	@echo "Migration uygulanıyor..."
 	@for f in internal/storage/migrations/*.sql; do \
 		echo "  → $$f"; \
@@ -92,12 +184,12 @@ migrate-up: ## Tüm migration'ları uygula
 	done
 	@echo "✅ Migration tamamlandı."
 
-migrate-down: ## Şemayı sıfırla (DROP SCHEMA public CASCADE — DİKKATLİ)
+migrate-down: check-psql ## Şemayı sıfırla (DROP SCHEMA public CASCADE — DİKKATLİ)
 	@echo "⚠️  Şema sıfırlanıyor..."
 	@PGPASSWORD=$(POSTGRES_PASSWORD) psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) \
 		-c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"
 
-migrate-status: ## Mevcut tablo listesini göster
+migrate-status: check-psql ## Mevcut tablo listesini göster
 	@PGPASSWORD=$(POSTGRES_PASSWORD) psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) \
 		-c "\dt public.*"
 
@@ -130,7 +222,7 @@ simulate: ## Bir senaryo koşusu başlat (CONFIG=configs/<senaryo>.yaml)
 
 .PHONY: verify-integrity verify-isolation
 
-verify-integrity: ## ADR-01: hts_records ↔ ground_truth eşleşme kontrolü
+verify-integrity: check-psql ## ADR-01: hts_records ↔ ground_truth eşleşme kontrolü
 	@echo "=== verify-integrity ==="
 	@PGPASSWORD=$(POSTGRES_PASSWORD) psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) \
 		-t -A -c "\
@@ -149,7 +241,11 @@ verify-isolation: ## K6: S2/S4 rollerinin ground_truth'a erişemediğini doğrul
 
 .PHONY: help
 help: ## Bu yardım metnini göster
-	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
+	@echo "HTS-KGA — kullanılabilir komutlar:"
+	@echo ""
+	@echo "  Hızlı başlangıç: make demo   (tek komut — .env oluşturur, altyapıyı kurar, örnek senaryo koşturur)"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?##' Makefile | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
 
 .DEFAULT_GOAL := help
@@ -168,7 +264,7 @@ integrity-batch: ## Bütünlük toplu fazı (kural 5, 2) — RUN_ID=... CONFIG=.
 	HTS_INTEGRITY_MODE=batch HTS_CONFIG=$(CONFIG) HTS_RUN_ID=$(RUN_ID) \
 		$(GO) run ./cmd/integrity
 
-verify-k7: ## K7 ölçümünü göster (integrity_metrics) — RUN_ID=...
+verify-k7: check-psql ## K7 ölçümünü göster (integrity_metrics) — RUN_ID=...
 	@PGPASSWORD=$(POSTGRES_PASSWORD) psql -h localhost -U $(POSTGRES_USER) -d $(POSTGRES_DB) -c "\
 		SELECT rule_id, rule_name, findings, true_positives, injected, \
 		       round(precision::numeric,4) AS precision, \
@@ -186,17 +282,24 @@ verify-k7: ## K7 ölçümünü göster (integrity_metrics) — RUN_ID=...
 
 .PHONY: verify-k10
 
-verify-k10: ## K10 ölçümünü göster — RUN_A=... RUN_B=... (aynı seed, iki run_id)
+verify-k10: check-psql ## K10 ölçümünü göster — RUN_A=... RUN_B=... (aynı seed, iki run_id)
 	@bash scripts/verify-k10.sh $(RUN_A) $(RUN_B)
 
 # ==============================================================================
 # API Gateway — Sprint 7 (E06/E07, ADR-12, ADR-13, ADR-33)
 # ==============================================================================
 
-.PHONY: gateway proto
+.PHONY: gateway gateway-stop proto
 
 gateway: ## API Gateway'i başlat (REST :8080 · gRPC :50051 · health :8086)
 	$(GO) run ./cmd/gateway
+
+gateway-stop: ## Gateway'in portlarını (8080/8086/50051/2116) zorla boşaltır
+	@fuser -k -KILL 8080/tcp 8086/tcp 50051/tcp 2116/tcp 2>/dev/null; \
+	echo "✅ Portlar boşaltıldı (zaten boşsa bu normaldir)."
+	@echo "   Not: 'pkill -f cmd/gateway' güvenilmez olabilir — 'go run' sarmalayıcısını"
+	@echo "   yakalar ama derlenmiş ikili farklı bir süreç olarak hayatta kalabilir."
+	@echo "   Bu hedef bunun yerine PORTA göre kapatır."
 
 proto: ## proto/ sözleşmesinden Go kodu üret (protoc + eklentiler gerekli)
 	protoc --go_out=. --go_opt=module=$(MODULE) \

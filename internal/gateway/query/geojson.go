@@ -81,7 +81,7 @@ func (s *Service) Cells(ctx context.Context, f CellsFilter) (GeoJSON, error) {
 	sql := `
         SELECT coalesce(json_build_object(
             'type','FeatureCollection',
-            'features', json_agg(json_build_object(
+            'features', coalesce(json_agg(json_build_object(
                 'type','Feature',
                 'geometry', ST_AsGeoJSON(c.location)::json,
                 'properties', json_build_object(
@@ -91,7 +91,7 @@ func (s *Service) Cells(ctx context.Context, f CellsFilter) (GeoJSON, error) {
                     'beam_width', c.beam_width,
                     'freq_mhz',   c.freq_mhz,
                     'r_max_m',    round(c.r_max_m::numeric, 1),
-                    'model_type', c.model_type)))
+                    'model_type', c.model_type))), '[]'::json)
         )::text, '` + emptyCollection + `')
         FROM cells c WHERE ` + where
 
@@ -150,7 +150,7 @@ func (s *Service) Estimates(ctx context.Context, f EstimatesFilter) (GeoJSON, er
 	sql := `
         SELECT coalesce(json_build_object(
             'type','FeatureCollection',
-            'features', json_agg(json_build_object(
+            'features', coalesce(json_agg(json_build_object(
                 'type','Feature',
                 'geometry', ST_AsGeoJSON(e.geometry)::json,
                 'properties', json_build_object(
@@ -162,7 +162,7 @@ func (s *Service) Estimates(ctx context.Context, f EstimatesFilter) (GeoJSON, er
                     'repaired',   e.repaired,
                     'ta_used',    e.ta_used,
                     'time',       h.time,
-                    'centroid',   ST_AsGeoJSON(e.centroid)::json)))
+                    'centroid',   ST_AsGeoJSON(e.centroid)::json))), '[]'::json)
         )::text, '` + emptyCollection + `')
         FROM ` + from + ` WHERE ` + where
 
@@ -223,7 +223,7 @@ func (s *Service) Findings(ctx context.Context, f FindingsFilter) (GeoJSON, erro
 	sql := `
         SELECT coalesce(json_build_object(
             'type','FeatureCollection',
-            'features', json_agg(json_build_object(
+            'features', coalesce(json_agg(json_build_object(
                 'type','Feature',
                 'geometry', CASE WHEN c.location IS NULL THEN NULL
                                  ELSE ST_AsGeoJSON(c.location)::json END,
@@ -236,7 +236,7 @@ func (s *Service) Findings(ctx context.Context, f FindingsFilter) (GeoJSON, erro
                     'detected_in',   f.detected_in,
                     'suppressed_by', f.suppressed_by,
                     'time',          f.time,
-                    'cell_known',    (c.location IS NOT NULL))))
+                    'cell_known',    (c.location IS NOT NULL)))), '[]'::json)
         )::text, '` + emptyCollection + `')
         FROM ` + from + ` WHERE ` + where
 
@@ -281,13 +281,13 @@ WITH activity AS (
 SELECT
   coalesce((SELECT json_build_object(
       'type','FeatureCollection',
-      'features', json_agg(json_build_object(
+      'features', coalesce(json_agg(json_build_object(
           'type','Feature',
           'geometry', ST_AsGeoJSON(k.location)::json,
           'properties', json_build_object(
               'cell_id',     k.cell_id,
               'records',     k.records,
-              'subscribers', k.subscribers))))
+              'subscribers', k.subscribers))), '[]'::json))
     FROM kept k)::text, '` + emptyCollection + `'),
   (SELECT count(*) FROM kept),
   (SELECT count(*) FROM activity a

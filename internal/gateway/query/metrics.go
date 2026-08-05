@@ -61,6 +61,59 @@ func (s *Service) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 	return out, rows.Err()
 }
 
+// SubscriberRow, bir abonenin koşu içindeki özetidir.
+type SubscriberRow struct {
+	PseudoMSISDN string
+	Records      int64
+	Estimates    int64
+}
+
+// Subscribers, koşunun tahmin geometrisi üretilmiş abonelerini, en zengin
+// veriye sahip olandan başlayarak döndürür.
+//
+// # Neden var
+//
+// ADR-13'ün "tek abone zorunlu" kuralını değiştirmez — `Estimates` ucu
+// hâlâ tek bir `subscriber` ister. Bu yalnızca o tek aboneyi **bulma**
+// adımını kolaylaştırır: öncesinde tek yol `psql` ile elle sorgu atmaktı.
+// Döndürülen `pseudo_msisdn`, gerçek numaranın geri döndürülemez HMAC
+// takma adıdır (ADR-15); gerçek kimlik, konum ya da `ground_truth` taşımaz.
+func (s *Service) Subscribers(ctx context.Context, runID uuid.UUID, limit int) ([]SubscriberRow, error) {
+	if runID == uuid.Nil {
+		return nil, ErrRunIDRequired
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+
+	rows, err := s.db.Query(ctx, `
+        SELECT h.pseudo_msisdn,
+               count(DISTINCT h.event_id)                               AS records,
+               count(DISTINCT e.event_id) FILTER (WHERE e.method='M')   AS estimates
+          FROM hts_records h
+          LEFT JOIN estimates e
+                 ON e.run_id = h.run_id AND e.event_id = h.event_id
+         WHERE h.run_id = $1::uuid
+         GROUP BY h.pseudo_msisdn
+        HAVING count(DISTINCT e.event_id) FILTER (WHERE e.method='M') > 0
+         ORDER BY estimates DESC, h.pseudo_msisdn
+         LIMIT $2`, runID.String(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("abone listesi: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SubscriberRow
+	for rows.Next() {
+		var r SubscriberRow
+		if err := rows.Scan(&r.PseudoMSISDN, &r.Records, &r.Estimates); err != nil {
+			return nil, fmt.Errorf("abone satırı: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // MetricRow, `metrics` tablosunun bir satırıdır (K1–K3).
 type MetricRow struct {
 	Scenario      string

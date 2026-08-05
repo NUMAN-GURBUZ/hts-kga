@@ -94,7 +94,14 @@ async function loadGeoLayer(name, path, params, style, onFeature) {
 
   try {
     const doc = await api.get(path, { run_id: state.runID, ...params });
-    const collection = doc.feature_collection ? JSON.parse(doc.feature_collection) : doc;
+    // Bazı uçlar (ör. /aggregate/cell-activity) `feature_collection`'ı bir
+    // sarmalayıcı içinde, zaten çözülmüş bir nesne olarak döner; diğerleri
+    // (cells/estimates/findings) tüm gövdeyi doğrudan GeoJSON olarak döner.
+    // İkisini de doğru ele almak için önce tipe bakılır — yalnızca gerçekten
+    // metinse tekrar JSON.parse edilir.
+    const collection = typeof doc.feature_collection === 'string'
+      ? JSON.parse(doc.feature_collection)
+      : (doc.feature_collection || doc);
 
     layers[name] = L.geoJSON(collection, {
       style: () => style,
@@ -206,14 +213,47 @@ async function loadRuns() {
   }
 }
 
+// loadSubscribers, koşuda tahmin geometrisi olan aboneleri "abone" seçim
+// kutusuna doldurur (en zengin veriden başlayarak) — elle psql sorgusuna
+// gerek bırakmaz. Gerçek kimlik/konum taşımaz, yalnızca pseudonim listeler
+// (bkz. internal/gateway/query/metrics.go: Subscribers).
+async function loadSubscribers() {
+  const sel = document.getElementById('subscriber');
+  const meta = document.getElementById('subscriber-meta');
+  sel.innerHTML = '<option value="">yükleniyor…</option>';
+  meta.textContent = '';
+  if (!state.runID) {
+    sel.innerHTML = '<option value="">— önce koşu seçin —</option>';
+    return;
+  }
+  try {
+    const { subscribers } = await api.get('/api/v1/subscribers', { run_id: state.runID, limit: 25 });
+    if (!subscribers.length) {
+      sel.innerHTML = '<option value="">bu koşuda tahmin geometrisi yok</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">— abone seçin —</option>';
+    for (const s of subscribers) {
+      const opt = document.createElement('option');
+      opt.value = s.pseudo_msisdn;
+      opt.textContent = `${s.pseudo_msisdn.slice(0, 12)}… · ${s.estimates} tahmin olayı`;
+      sel.appendChild(opt);
+    }
+  } catch (err) {
+    sel.innerHTML = '<option value="">hata</option>';
+    setStatus(err.message, 'error');
+  }
+}
+
 document.getElementById('run').onchange = async (e) => {
   state.runID = e.target.value;
+  state.subscriber = '';
   for (const name of Object.keys(layers)) clearLayer(name);
   for (const id of ['l-cells', 'l-activity', 'l-findings', 'l-b0', 'l-b1', 'l-m']) {
     document.getElementById(id).checked = false;
   }
   document.getElementById('run-meta').textContent = state.runID ? `koşu ${state.runID}` : '';
-  await loadMetrics();
+  await Promise.all([loadMetrics(), loadSubscribers()]);
 
   // Haritayı koşunun hücrelerine göre konumlandır.
   if (state.runID) {
@@ -225,7 +265,23 @@ document.getElementById('run').onchange = async (e) => {
   }
 };
 
-document.getElementById('subscriber').oninput = (e) => { state.subscriber = e.target.value.trim(); };
+document.getElementById('subscriber').onchange = (e) => {
+  state.subscriber = e.target.value;
+  const opt = e.target.selectedOptions[0];
+  document.getElementById('subscriber-meta').textContent =
+    state.subscriber ? opt.textContent : '';
+
+  // Abone değiştiğinde zaten açık olan tahmin katmanları eski aboneyi
+  // göstermeye devam etmesin — sessizce bayatlamak yerine yeniden yüklenir.
+  const active = [
+    ['l-b0', () => loadEstimates('B0', -1, 'B0')],
+    ['l-b1', () => loadEstimates('B1', -1, 'B1')],
+    ['l-m',  () => loadEstimates('M', 0.9, 'M')],
+  ];
+  for (const [id, fn] of active) {
+    if (document.getElementById(id).checked) fn();
+  }
+};
 
 // ─── Katman anahtarları ───────────────────────────────────────────────────────
 

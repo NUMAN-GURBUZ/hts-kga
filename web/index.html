@@ -52,9 +52,9 @@
 
     <section>
       <h2>Olasılık geometrileri</h2>
-      <p class="hint">ADR-13: tek abone zorunlu</p>
-      <input id="subscriber" placeholder="pseudo_msisdn" autocomplete="off">
-      <p class="hint">psql: SELECT pseudo_msisdn FROM hts_records WHERE run_id=… LIMIT 1</p>
+      <p class="hint">ADR-13: tek abone zorunlu — koşu seçilince liste dolar</p>
+      <select id="subscriber"><option value="">— önce koşu seçin —</option></select>
+      <div id="subscriber-meta" class="meta"></div>
       <label class="chk"><input type="checkbox" id="l-b0"> B0 — naif daire</label>
       <label class="chk"><input type="checkbox" id="l-b1"> B1 — sektör dilimi</label>
       <label class="chk"><input type="checkbox" id="l-m"> M@90 — olasılıksal</label>

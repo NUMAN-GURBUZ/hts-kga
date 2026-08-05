@@ -8,9 +8,14 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -125,6 +130,17 @@ func (h *Handler) MustServe(addr string) {
 
 	slog.Info("health server başlatılıyor", "addr", addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			// DX: çıplak panic + stack trace yerine tek satırlık, eyleme
+			// geçirilebilir bir mesaj — bu servisin (h.service) başka bir
+			// kopyası zaten çalışıyor olabilir (bkz. docs/results/demo-script.md).
+			fmt.Fprintf(os.Stderr,
+				"\n❌ HATA: %s portu zaten kullanımda — %s'in başka bir kopyası hâlâ çalışıyor olabilir.\n"+
+					"   Zorla boşaltmak için (gateway ise):  make gateway-stop\n"+
+					"   Genel amaçlı:  fuser -k -KILL %s/tcp   (adresteki ':' işaretini atlayın)\n\n",
+				addr, h.service, strings.TrimPrefix(addr, ":"))
+			os.Exit(1)
+		}
 		panic("health server hatası: " + err.Error())
 	}
 }

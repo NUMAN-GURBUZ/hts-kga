@@ -72,6 +72,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/v1/runs", s.handleRuns)
+	mux.HandleFunc("GET /api/v1/subscribers", s.handleSubscribers)
 	mux.HandleFunc("GET /api/v1/cells", s.handleCells)
 	mux.HandleFunc("GET /api/v1/estimates", s.handleEstimates)
 	mux.HandleFunc("GET /api/v1/findings", s.handleFindings)
@@ -122,6 +123,38 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 
 	s.audit(r, "api_runs", "run_config", uuid.Nil, map[string]any{"count": len(out)})
 	s.writeJSON(w, http.StatusOK, map[string]any{"runs": out})
+}
+
+// handleSubscribers, koşuda tahmin geometrisi olan aboneleri listeler
+// (web arayüzünün "abone" seçici kutusu için — bkz. query.Service.Subscribers).
+func (s *Server) handleSubscribers(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := query.WithTimeout(r.Context())
+	defer cancel()
+
+	runID, err := runIDParam(r)
+	if err != nil {
+		s.fail(w, r, "api_subscribers", "hts_records", uuid.Nil, err)
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	subs, err := s.svc.Subscribers(ctx, runID, limit)
+	if err != nil {
+		s.fail(w, r, "api_subscribers", "hts_records", runID, err)
+		return
+	}
+
+	out := make([]map[string]any, 0, len(subs))
+	for _, sub := range subs {
+		out = append(out, map[string]any{
+			"pseudo_msisdn": sub.PseudoMSISDN,
+			"records":       sub.Records,
+			"estimates":     sub.Estimates,
+		})
+	}
+
+	s.audit(r, "api_subscribers", "hts_records", runID, map[string]any{"count": len(out)})
+	s.writeJSON(w, http.StatusOK, map[string]any{"subscribers": out})
 }
 
 func (s *Server) handleCells(w http.ResponseWriter, r *http.Request) {
