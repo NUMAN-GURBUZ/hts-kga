@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/NUMAN-GURBUZ/hts-kga/internal/config"
+	"github.com/NUMAN-GURBUZ/hts-kga/internal/rf"
 	"github.com/NUMAN-GURBUZ/hts-kga/pkg/geo"
 )
 
@@ -13,7 +14,7 @@ const testSeed = 42
 
 func mustField(t *testing.T) *ShadowingField {
 	t.Helper()
-	f, err := NewShadowingField(testSeed, UTHeightM)
+	f, err := NewShadowingField(testSeed, rf.UTHeightM)
 	if err != nil {
 		t.Fatalf("NewShadowingField: %v", err)
 	}
@@ -23,9 +24,9 @@ func mustField(t *testing.T) *ShadowingField {
 // newSource, verilen model ve konumda bir test sitesi kurar.
 func newSource(t *testing.T, model config.PropagationModel, key uint64, enu geo.Point) Source {
 	t.Helper()
-	m, err := ModelFor(model)
+	m, err := rf.ModelFor(model)
 	if err != nil {
-		t.Fatalf("ModelFor(%q): %v", model, err)
+		t.Fatalf("rf.ModelFor(%q): %v", model, err)
 	}
 	return Source{Key: key, ENU: enu, Model: m}
 }
@@ -124,7 +125,7 @@ func TestShadowing_SiteLevelCorrelation(t *testing.T) {
 // etkisi ölçülür.
 func TestShadowing_SpatialCorrelation(t *testing.T) {
 	f := mustField(t)
-	uma, _ := ModelFor(config.ModelUMa)
+	uma, _ := rf.ModelFor(config.ModelUMa)
 	grid := uma.DecorrelationM(false) // 50 m
 
 	src := newSource(t, config.ModelUMa, 4242, geo.Point{X: 100000, Y: 0})
@@ -175,9 +176,9 @@ func sampleShadowing(t *testing.T, f *ShadowingField, model config.PropagationMo
 	d2DM float64, n int) (losSamples, nlosSamples []float64) {
 	t.Helper()
 
-	m, err := ModelFor(model)
+	m, err := rf.ModelFor(model)
 	if err != nil {
-		t.Fatalf("ModelFor: %v", err)
+		t.Fatalf("rf.ModelFor: %v", err)
 	}
 
 	agent := geo.Point{}
@@ -238,7 +239,7 @@ func TestShadowing_SigmaMatchesStandard(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(string(tc.model), func(t *testing.T) {
-			m, _ := ModelFor(tc.model)
+			m, _ := rf.ModelFor(tc.model)
 			los, nlos := sampleShadowing(t, f, tc.model, tc.d2DM, samples)
 
 			for _, c := range []struct {
@@ -278,7 +279,7 @@ func TestShadowing_Normality(t *testing.T) {
 	const samples = 500_000
 
 	f := mustField(t)
-	m, _ := ModelFor(config.ModelRMa)
+	m, _ := rf.ModelFor(config.ModelRMa)
 
 	xs := make([]float64, 0, samples)
 	agent := geo.Point{}
@@ -329,8 +330,8 @@ func TestShadowing_LOSRatioMatchesProbability(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		m, _ := ModelFor(tc.model)
-		want := m.LOSProbability(tc.d2DM, UTHeightM)
+		m, _ := rf.ModelFor(tc.model)
+		want := m.LOSProbability(tc.d2DM, rf.UTHeightM)
 
 		los, nlos := sampleShadowing(t, f, tc.model, tc.d2DM, samples)
 		got := float64(len(los)) / float64(len(los)+len(nlos))
@@ -352,7 +353,7 @@ func TestShadowing_LOSAndValueIndependent(t *testing.T) {
 	const samples = 300_000
 
 	f := mustField(t)
-	m, _ := ModelFor(config.ModelUMa)
+	m, _ := rf.ModelFor(config.ModelUMa)
 
 	// σ'nın LOS'a bağlı olması karşılaştırmayı bozar; normalize ederek bakılır.
 	var sumLOS, sumNLOS float64
@@ -393,7 +394,7 @@ func TestShadowing_SeedSeparation(t *testing.T) {
 
 	seen := make(map[float64]bool)
 	for _, seed := range []int64{1, 7, 42, 99, 12345} {
-		f, err := NewShadowingField(seed, UTHeightM)
+		f, err := NewShadowingField(seed, rf.UTHeightM)
 		if err != nil {
 			t.Fatalf("seed %d: %v", seed, err)
 		}
@@ -462,13 +463,13 @@ func TestShadowing_ClampedAtEightSigma(t *testing.T) {
 // Hedef: **0 allocs/op**. 8,64M tick × ~8 aday hücre = ~69M çağrı beklenir;
 // çağrı başına tek bir yığın ayırma bile GC baskısını kabul edilemez kılar.
 func BenchmarkEnvironmentAt(b *testing.B) {
-	f, err := NewShadowingField(testSeed, UTHeightM)
+	f, err := NewShadowingField(testSeed, rf.UTHeightM)
 	if err != nil {
 		b.Fatalf("NewShadowingField: %v", err)
 	}
-	m, err := ModelFor(config.ModelUMa)
+	m, err := rf.ModelFor(config.ModelUMa)
 	if err != nil {
-		b.Fatalf("ModelFor: %v", err)
+		b.Fatalf("rf.ModelFor: %v", err)
 	}
 
 	src := Source{Key: 0xDEADBEEF, ENU: geo.Point{X: 500, Y: 500}, Model: m}

@@ -1,0 +1,193 @@
+// HTS-KGA API sözleşmesi (T-E06-01, ADR-12, ADR-33).
+//
+// # Geometri alanları neden `string`
+//
+// ADR-12/2: GeoJSON **veritabanında** üretilir (`ST_AsGeoJSON`). Proto tarafında
+// alan tipi GeoJSON metnidir; uygulama katmanında geometri dönüşüm kodu
+// yazılmaz. Bir `Polygon` mesajı tanımlamak, PostGIS'in zaten ürettiği
+// çıktıyı çözüp yeniden kurmak olurdu.
+//
+// # grpc-gateway kullanılmaz
+//
+// ADR-12/1: REST handler'ları **elle** yazılır ve gRPC ile aynı servis
+// katmanını çağırır. Bu dosya iki tarafın da ortak sözleşmesidir; aralarında
+// kod üretimi yoktur.
+//
+// # ground_truth burada yok ve olmayacak
+//
+// ADR-33/2: gateway gerçek konumu göremez (`svc_gateway` rolünün yetkisi yok).
+// Bu sözleşmede gerçek konum taşıyan bir alan tanımlanmaz — kör test (K6)
+// API katmanına kadar uzar.
+
+syntax = "proto3";
+
+package hts.v1;
+
+option go_package = "github.com/NUMAN-GURBUZ/hts-kga/proto/hts/v1;htsv1";
+
+// ─── Ortak ────────────────────────────────────────────────────────────────────
+
+// BoundingBox, viewport süzgecidir (ADR-13: harita hareketinde ST_Intersects).
+message BoundingBox {
+  double min_lon = 1;
+  double min_lat = 2;
+  double max_lon = 3;
+  double max_lat = 4;
+}
+
+// TimeRange, zaman aralığı süzgecidir (ADR-13: varsayılan 1 gün).
+message TimeRange {
+  // RFC3339. Boşsa sunucu varsayılanı uygular.
+  string from = 1;
+  string to = 2;
+}
+
+// ─── Koşular ──────────────────────────────────────────────────────────────────
+
+message ListRunsRequest {
+  int32 limit = 1;
+}
+
+message Run {
+  string run_id = 1;
+  string scenario = 2;
+  string morphology = 3;
+  int64 seed = 4;
+  string started_at = 5;
+  string finished_at = 6;
+  int64 published_events = 7;
+  int64 analyzed_events = 8;
+  int64 inspected_records = 9;
+  // Lambda, kalibre edilmiş belirsizlik ölçeğidir (ADR-02). Boşsa kalibre
+  // edilmemiş.
+  double lambda = 10;
+  bool has_lambda = 11;
+}
+
+message ListRunsResponse {
+  repeated Run runs = 1;
+}
+
+// ─── Geometri uçları ──────────────────────────────────────────────────────────
+
+// GeoJsonResponse, tüm harita uçlarının ortak yanıtıdır.
+//
+// `feature_collection` doğrudan PostGIS'ten gelen GeoJSON metnidir (ADR-12/2).
+message GeoJsonResponse {
+  string feature_collection = 1;
+  // Count, koleksiyondaki geometri sayısıdır (ADR-13 sınır denetimi için).
+  int32 count = 2;
+  // Truncated her zaman false'tur: sınır aşılırsa istek REDDEDİLİR (400),
+  // sessizce kırpılmaz. Alan, sözleşmenin bu davranışı açıkça beyan etmesi
+  // için vardır.
+  bool truncated = 3;
+}
+
+message GetCellsRequest {
+  string run_id = 1;
+  BoundingBox bbox = 2;
+}
+
+message GetEstimatesRequest {
+  string run_id = 1;
+  // Subscriber, `pseudo_msisdn`'dir (ADR-33/3). ADR-13 zorunlu kılar.
+  string subscriber = 2;
+  TimeRange time_range = 3;
+  // Method: "B0" | "B1" | "M". Boşsa hepsi.
+  string method = 4;
+  // Confidence: 0.50 | 0.90 | 0.95. 0 ise hepsi.
+  double confidence = 5;
+  BoundingBox bbox = 6;
+}
+
+message GetFindingsRequest {
+  string run_id = 1;
+  // RuleId: 1..5. 0 ise hepsi.
+  int32 rule_id = 2;
+  TimeRange time_range = 3;
+  BoundingBox bbox = 4;
+  // CanonicalOnly true ise yalnızca kanonik bulgular (ADR-28/4).
+  bool canonical_only = 5;
+}
+
+// ─── Ölçüm uçları (aggregate) ─────────────────────────────────────────────────
+
+message GetMetricsRequest {
+  string run_id = 1;
+}
+
+message MetricRow {
+  string scenario = 1;
+  string method = 2;
+  double confidence = 3;
+  string partition_key = 4;
+  int64 n_events = 5;
+  double coverage_rate = 6;
+  double median_area_km2 = 7;
+  double p90_area_km2 = 8;
+  double r50_m = 9;
+  double r95_m = 10;
+  int32 p95_part_count = 11;
+  double repaired_ratio = 12;
+  double reduction_vs_b0 = 13;
+  double reduction_vs_b1 = 14;
+}
+
+message GetMetricsResponse {
+  repeated MetricRow rows = 1;
+}
+
+message GetIntegrityMetricsRequest {
+  string run_id = 1;
+}
+
+message IntegrityMetricRow {
+  int32 rule_id = 1;
+  string rule_name = 2;
+  int64 findings = 3;
+  int64 true_positives = 4;
+  int64 injected = 5;
+  double precision = 6;
+  bool has_precision = 7;
+  double recall = 8;
+  double precision_lo = 9;
+  double precision_hi = 10;
+  bool sufficient = 11;
+}
+
+message GetIntegrityMetricsResponse {
+  repeated IntegrityMetricRow rows = 1;
+}
+
+// CellActivityRequest, k-anonim hücre yoğunluğu ucudur (ADR-33/5).
+message GetCellActivityRequest {
+  string run_id = 1;
+  BoundingBox bbox = 2;
+}
+
+// CellActivityResponse, k=5 eşiğini geçen hücreleri döndürür.
+//
+// `suppressed_cells`, k eşiği nedeniyle **gizlenen** hücre sayısıdır. Gizleme
+// sessiz olmaz: kaç grubun bastırıldığı raporlanır.
+message GetCellActivityResponse {
+  string feature_collection = 1;
+  int32 count = 2;
+  int32 suppressed_cells = 3;
+  int32 k = 4;
+}
+
+// ─── Servis ───────────────────────────────────────────────────────────────────
+
+// HtsService, iç tüketiciler için gRPC yüzeyidir.
+//
+// REST handler'ları (ADR-12/1) aynı servis katmanını çağırır; ikisi arasında
+// kod üretimi yoktur.
+service HtsService {
+  rpc ListRuns(ListRunsRequest) returns (ListRunsResponse);
+  rpc GetCells(GetCellsRequest) returns (GeoJsonResponse);
+  rpc GetEstimates(GetEstimatesRequest) returns (GeoJsonResponse);
+  rpc GetFindings(GetFindingsRequest) returns (GeoJsonResponse);
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+  rpc GetIntegrityMetrics(GetIntegrityMetricsRequest) returns (GetIntegrityMetricsResponse);
+  rpc GetCellActivity(GetCellActivityRequest) returns (GetCellActivityResponse);
+}

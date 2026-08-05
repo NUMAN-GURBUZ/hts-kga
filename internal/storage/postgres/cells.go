@@ -238,3 +238,43 @@ func (a *cellArrays) set(i int, r CellRow) error {
 	a.lon[i], a.lat[i] = r.Lon, r.Lat
 	return nil
 }
+
+// SelectCellLocations, koşunun hücre kimliklerini ve konumlarını döndürür
+// (T-E05-02, bütünlük envanteri).
+//
+// # Neden Redis'in yanında bir de bu yol var
+//
+// Redis anahtarları koşu ömürlüdür ve `DeleteRunKeys` ile temizlenir; `cells`
+// tablosu kalıcıdır. Bütünlük denetimi geçmiş bir koşu üzerinde yeniden
+// koşturulabilmelidir — hata ayıklamada ve ölçüm tekrarında bu normal bir
+// ihtiyaçtır. `svc_integrity` rolünün `cells` üzerinde SELECT yetkisi vardır
+// (migration 004), ek yetki gerekmez.
+//
+// Sıra konuma göredir (ADR-35): envanterin bellek düzeni koşudan koşuya aynı
+// olmalıdır (K10). `cell_id` BİLİNÇLİ OLARAK run_id içerir (ADR-05, DB
+// birincil anahtar çakışmasını önler); ona göre sıralamak aynı fiziksel
+// hücrenin aynı seed'le bile iki koşuda farklı sırada toplanmasına yol açardı
+// — konum run_id'den bağımsızdır.
+func (p *Pool) SelectCellLocations(ctx context.Context, runID uuid.UUID) ([]CellRow, error) {
+	rows, err := p.pool.Query(ctx, `
+        SELECT cell_id, run_id, r_max_m,
+               ST_Y(location::geometry) AS lat,
+               ST_X(location::geometry) AS lon
+          FROM cells
+         WHERE run_id = $1::uuid
+         ORDER BY lat, lon`, runID.String())
+	if err != nil {
+		return nil, fmt.Errorf("hücre konumları okunamadı (%s): %w", runID, err)
+	}
+	defer rows.Close()
+
+	var out []CellRow
+	for rows.Next() {
+		var c CellRow
+		if err := rows.Scan(&c.CellID, &c.RunID, &c.RMaxM, &c.Lat, &c.Lon); err != nil {
+			return nil, fmt.Errorf("hücre konumu satırı okunamadı: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

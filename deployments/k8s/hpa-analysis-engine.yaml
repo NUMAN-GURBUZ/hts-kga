@@ -1,0 +1,24 @@
+# Dağıtım belgesi düzeyinde teslim (ADR-16, D-01). Bu HPA'nın davranışı
+# ÖLÇÜLMEDİ: K9'un ölçülen sonucu Docker Compose'dadır (ADR-34/4).
+# Kafka'nın hts.records topic'i 4 partition taşır (scripts/kafka-setup.sh);
+# maxReplicas bunun üzerinde bir consumer group faydasızdır (fazla replika
+# boşta kalır).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: analysis-engine
+  namespace: hts-kga
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: analysis-engine
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

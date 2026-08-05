@@ -96,10 +96,61 @@ type CalibrationSection struct {
 
 // IntegritySection, manipülasyon enjeksiyonu ve tespit ayarları (ADR-09).
 type IntegritySection struct {
-	MaxVelocityKMH float64         `yaml:"max_velocity_kmh"`
-	InjectionRate  float64         `yaml:"injection_rate"`
-	RuleWeights    map[int]float64 `yaml:"rule_weights"`
+	MaxVelocityKMH float64          `yaml:"max_velocity_kmh"`
+	InjectionRate  float64          `yaml:"injection_rate"`
+	RuleWeights    map[int]float64  `yaml:"rule_weights"`
+	Detection      DetectionSection `yaml:"detection"`
 }
+
+// DetectionSection, tespit tarafının parametreleridir (ADR-27..31, Sprint 6).
+//
+// Enjeksiyon tarafından ayrıdır: `max_velocity_kmh` ve `rule_weights` hem
+// üreteci hem dedektörü ilgilendirir, buradaki alanlar yalnızca dedektörü.
+//
+// # Neden bu kadar az parametre var
+//
+// ADR-29 kural 2'nin atıf mekanizmasını **katı eşitsizlikle** tanımlar:
+// ayarlanacak bir tolerans yoktur. Kural 1, 3 ve 5'in eşiği hiç yoktur.
+// Parametre azlığı tasarımın sonucudur — ayarlanabilir yüzey ne kadar küçükse
+// etiketli veriye aşırı uydurma imkânı da o kadar küçüktür (ADR-29 beyanı).
+type DetectionSection struct {
+	// VelocityMarginCap, `margin` alanının üst sınırıdır (ADR-31).
+	//
+	// Δt = 0 ve mesafe > 0 durumunda ima edilen hız sonsuzdur; Go'nun
+	// json.Marshal'ı +Inf için hata döner ve bulgu hiç yazılmazdı.
+	VelocityMarginCap float64 `yaml:"velocity_margin_cap"`
+
+	// TimeBackstepToleranceS, kural 3'ün geriye gidiş toleransıdır (saniye).
+	//
+	// Varsayılan 0: tick içi eşit damgalar ihlal değildir (karşılaştırma katı
+	// küçüktür), ama bir saniyelik geri gidiş bile ihlaldir. Pozitif bir
+	// tolerans, kaydırılmış damgaları görmezden gelmeye başlar.
+	TimeBackstepToleranceS float64 `yaml:"time_backstep_tolerance_s"`
+
+	// ActivityMinSupport, kural 5'in modal IMEI referansı için gereken asgari
+	// kayıt sayısıdır.
+	//
+	// Referans IMEI bu kadar kayıtla desteklenmiyorsa abone için karar
+	// verilmez: tek kayıtlı bir abonede "modal" IMEI kavramı boştur.
+	ActivityMinSupport int `yaml:"activity_min_support"`
+
+	// MinFindingsForThreshold, K7 eşiğinin uygulanabilmesi için gereken
+	// asgari kanonik bulgu sayısıdır (ADR-31, ölçülebilirlik kuralı).
+	//
+	// Altında kalan kurallar Wilson %95 aralığıyla ve "istatistiksel olarak
+	// yetersiz" etiketiyle raporlanır; eşiği geçmiş sayılmazlar.
+	MinFindingsForThreshold int `yaml:"min_findings_for_threshold"`
+}
+
+// Tespit varsayılanları (ADR-29, ADR-31). Sıfır bırakılan alanlara uygulanır.
+const (
+	// DefaultVelocityMarginCap, ADR-31'in `margin` CHECK üst sınırıyla aynıdır.
+	DefaultVelocityMarginCap = 1e6
+	// DefaultActivityMinSupport, modal IMEI için asgari destektir.
+	DefaultActivityMinSupport = 2
+	// DefaultMinFindingsForThreshold, ADR-31'in ölçülebilirlik eşiğidir.
+	DefaultMinFindingsForThreshold = 30
+)
 
 // PrivacySection, mahremiyet ayarları (ADR-15).
 type PrivacySection struct {
@@ -159,10 +210,32 @@ func Parse(data []byte) (*Scenario, error) {
 	if err := s.resolveProfile(); err != nil {
 		return nil, err
 	}
+	s.applyDetectionDefaults()
 	if err := s.Validate(); err != nil {
 		return nil, err
 	}
 	return &s, nil
+}
+
+// applyDetectionDefaults, tespit bölümünde boş bırakılan alanlara varsayılan
+// atar (ADR-29, ADR-31).
+//
+// Varsayılan uygulanması diğer bölümlerin fail-fast disiplininden bir sapma
+// değildir: bu alanlar Sprint 6'da eklendi ve değerleri ADR'lerde dondurulmuş
+// sabitlerdir. Config'de yazılmaları belgeleme amaçlıdır, seçim amaçlı değil —
+// yanlış bir değer yine reddedilir (Validate).
+func (s *Scenario) applyDetectionDefaults() {
+	d := &s.Integrity.Detection
+	if d.VelocityMarginCap == 0 {
+		d.VelocityMarginCap = DefaultVelocityMarginCap
+	}
+	if d.ActivityMinSupport == 0 {
+		d.ActivityMinSupport = DefaultActivityMinSupport
+	}
+	if d.MinFindingsForThreshold == 0 {
+		d.MinFindingsForThreshold = DefaultMinFindingsForThreshold
+	}
+	// TimeBackstepToleranceS'in varsayılanı zaten 0'dır (ADR-29: katı karşılaştırma).
 }
 
 // resolveProfile, ADR-17 factory'sini çalıştırır ve YAML override'larını uygular.
@@ -326,6 +399,9 @@ func (s *Scenario) Validate() error {
 	if err := validateRuleWeights(s.Integrity.RuleWeights); err != nil {
 		return err
 	}
+	if err := validateDetection(s.Integrity.Detection); err != nil {
+		return err
+	}
 
 	// Mahremiyet (ADR-15)
 	if s.Privacy.KAnonymity < 1 {
@@ -362,6 +438,29 @@ func validateRuleWeights(w map[int]float64) error {
 	}
 	if sum <= 0 {
 		return fmt.Errorf("integrity.rule_weights toplamı pozitif olmalı (%g)", sum)
+	}
+	return nil
+}
+
+// validateDetection, tespit parametrelerini denetler (ADR-27..31).
+func validateDetection(d DetectionSection) error {
+	// Üst sınır 1'in altında olsaydı margin CHECK kısıtı (>= 1.0) ile
+	// çelişirdi ve her kapılan bulgu veritabanı tarafından reddedilirdi.
+	if d.VelocityMarginCap < 1 {
+		return fmt.Errorf("integrity.detection.velocity_margin_cap ≥ 1 olmalı (%g)",
+			d.VelocityMarginCap)
+	}
+	if d.TimeBackstepToleranceS < 0 {
+		return fmt.Errorf("integrity.detection.time_backstep_tolerance_s negatif olamaz (%g)",
+			d.TimeBackstepToleranceS)
+	}
+	if d.ActivityMinSupport < 1 {
+		return fmt.Errorf("integrity.detection.activity_min_support ≥ 1 olmalı (%d)",
+			d.ActivityMinSupport)
+	}
+	if d.MinFindingsForThreshold < 1 {
+		return fmt.Errorf("integrity.detection.min_findings_for_threshold ≥ 1 olmalı (%d)",
+			d.MinFindingsForThreshold)
 	}
 	return nil
 }

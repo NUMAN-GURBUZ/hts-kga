@@ -43,12 +43,37 @@ services:
       # KRaft zorunlu değişkenleri
       KAFKA_NODE_ID:                          1
       KAFKA_PROCESS_ROLES:                    broker,controller
-      KAFKA_LISTENERS:                        PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS:             PLAINTEXT://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:   PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      # ADR-32: SASL_PLAINTEXT + SCRAM-SHA-256 + StandardAuthorizer.
+      # Kör testin 1. katmanı buna dayanır: PLAINTEXT'te her bağlantı
+      # ANONYMOUS principal'ıdır ve `User:svc_analysis` diye bir özne yoktur,
+      # dolayısıyla ona uygulanacak bir yasak da yoktur.
+      # Dört dinleyici (ADR-32/1, CONTAINER ADR-34/4 ile eklendi):
+      #   SASL://:9092      yayınlanır — host makinedeki servis istemcileri, SCRAM kimlikli
+      #   INTERNAL://:9094  yayınlanmaz — broker'lar arası + kurulum CLI'ı
+      #   CONTROLLER://:9093 yayınlanmaz — KRaft quorum
+      #   CONTAINER://:9095 yayınlanmaz — compose ağındaki KARDEŞ konteynerler
+      #     (K9 ölçümü, `analysis-engine` scale-test servisi). SASL/ACL
+      #     modeli SASL://9092 ile birebir aynıdır; tek fark reklamı yapılan
+      #     adresin `localhost` değil `kafka` (compose DNS adı) olmasıdır —
+      #     host için doğru olan reklam bir konteyner için erişilemezdi.
+      KAFKA_LISTENERS:                        SASL://:9092,INTERNAL://:9094,CONTROLLER://:9093,CONTAINER://:9095
+      KAFKA_ADVERTISED_LISTENERS:             SASL://localhost:9092,INTERNAL://localhost:9094,CONTAINER://kafka:9095
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:   SASL:SASL_PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,CONTAINER:SASL_PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES:        CONTROLLER
       KAFKA_CONTROLLER_QUORUM_VOTERS:         1@localhost:9093
-      KAFKA_INTER_BROKER_LISTENER_NAME:       PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME:       INTERNAL
+      KAFKA_SASL_ENABLED_MECHANISMS:          SCRAM-SHA-256
+      # Yetkilendirme (ADR-32/2). Kafka'nın varsayılanı
+      # `allow.everyone.if.no.acl.found=false`: ACL yoksa REDDET.
+      # svc_analysis ve svc_integrity için hts.groundtruth üzerinde hiçbir
+      # kayıt yoktur — yasak, DENY kuralıyla değil yetki vermeyerek kurulur.
+      KAFKA_AUTHORIZER_CLASS_NAME:            org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      # Süper kullanıcı yalnızca yayınlanmayan 9094'ten ulaşılabilir (ADR-32/3).
+      KAFKA_SUPER_USERS:                      User:ANONYMOUS
+      # SASL sunucu tarafı bildirimi. Dosyada parola YOKTUR: SCRAM'da sunucu,
+      # istemci parolalarını doğrulamak için sırra ihtiyaç duymaz — tuzlanmış
+      # karmalar broker meta verisindedir.
+      KAFKA_OPTS: -Djava.security.auth.login.config=/etc/kafka/jaas/broker_jaas.conf
       # Performans / güvenilirlik
       KAFKA_LOG_RETENTION_HOURS:              168       # 7 gün — simülasyon süresi + marj
       KAFKA_AUTO_CREATE_TOPICS_ENABLE:        "false"   # topic'ler make seed-kafka ile oluşturulur
@@ -61,8 +86,12 @@ services:
       - "9092:9092"
     volumes:
       - kafka_data:/var/lib/kafka/data
+      - ./kafka:/etc/kafka/jaas:ro
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      # Sağlık denetimi iç porttan yapılır: SASL kimlikleri broker ayağa
+      # kalktıktan sonra yazılır (make seed-kafka), dolayısıyla 9092 ilk
+      # açılışta henüz kimlik doğrulayamaz.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9094 >/dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 10
@@ -96,6 +125,12 @@ services:
     image: prom/prometheus:v3.4.1
     container_name: hts-prometheus
     restart: unless-stopped
+    # `host.docker.internal` yalnızca Docker Desktop'ta (Mac/Windows)
+    # varsayılan olarak çözümlenir. Linux'ta konteyner host ağını göremez;
+    # `host-gateway` özel adresi bu köprüyü açıkça kurar (ADR-34/2 doğrulaması
+    # sırasında ölçüldü: extra_hosts olmadan tüm beş hedef "down" kalıyordu).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
@@ -118,6 +153,47 @@ services:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # K9 ölçekleme altyapısı — yalnızca ölçüm için (ADR-16, ADR-34/4)
+  #
+  # Varsayılan `docker compose up`'a dahil DEĞİLDİR (`profiles`). Günlük
+  # geliştirme akışı `go run ./cmd/analysis-engine` ile devam eder; bu servis
+  # yalnızca `docker compose --profile scale-test up --scale
+  # analysis-engine=N analysis-engine` ile, HTS_RUN_ID ortam değişkeni
+  # verilerek çalıştırılır. Tüm replikalar aynı consumer group'u paylaşır
+  # (`hts-analysis-engine`, kod içinde sabit) — bu, K9'un ölçtüğü şeyin ta
+  # kendisidir: partition'ların replikalar arasında paylaşılması.
+  # ─────────────────────────────────────────────────────────────────────────────
+  analysis-engine:
+    build:
+      context: ../..
+      dockerfile: deployments/compose/analysis-engine.Dockerfile
+    profiles: ["scale-test"]
+    env_file: ../../.env
+    environment:
+      HTS_CONFIG:          ${HTS_CONFIG:-/configs/urban_no_ta.yaml}
+      # HTS_RUN_ID burada zorunlu kılınmaz (boş bırakılırsa aşağıdaki `up -d
+      # kafka` gibi bu servisi hiç hedeflemeyen komutlar bile interpolasyon
+      # aşamasında bloke olurdu) — analysis-engine'in kendisi zaten
+      # HTS_RUN_ID'yi açık hatayla ister (ADR-05).
+      HTS_RUN_ID:           ${HTS_RUN_ID:-}
+      HTS_IDLE_TIMEOUT:     ${HTS_IDLE_TIMEOUT:-20s}
+      HTS_SAMPLE_MODE:      ${HTS_SAMPLE_MODE:-validation}
+      POSTGRES_HOST:        postgres
+      REDIS_ADDR:           redis:6379
+      KAFKA_BROKERS:        kafka:9095
+      KAFKA_SASL_USER:      svc_analysis
+      KAFKA_SASL_PASSWORD:  ${KAFKA_PW_ANALYSIS:-analysis_dev_pw}
+    volumes:
+      - ../../configs:/configs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
 volumes:
   postgres_data:

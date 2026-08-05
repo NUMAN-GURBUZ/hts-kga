@@ -649,7 +649,10 @@ GİRDİ : hts_record (cell_id, ta_value), cells envanteri (Redis), λ
    Kesişim boş ise → TA'yı yok say, ta_used=false (T-E03-08b)
 3. Bölgeyi kaplayan pointy-top hex ızgara üret (ADR-07, ENU metre)
 4. Her hücre merkezi p için:
-     w_ang(p) = beamPattern(|θ_s(p) − azimuth_s|)            # anten deseni, 0..1
+     w_ang(p) = beamPattern(φ_s(p), θ_s(p))                  # TAM anten deseni
+                                                             # (azimut + eğim), 0..1
+                                                             # ADR-18/7 tadili:
+                                                             # simülatör tutarlılığı için
      w_rad(p) = radialWeight(d(p,s), r_max, ta_ring, σ_eff)  # link budget + TA
      w_nbr(p) = Φ( Δ(p) / (σ_eff·√2) )                       # ADR-03
      mass_raw(p) = w_ang · w_rad · w_nbr

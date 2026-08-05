@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<!--
+  HTS-KGA görselleştirme (E07, ADR-13).
+
+  Gateway tarafından /static altında servis edilir (ADR-12/3); sayfa ve API
+  aynı kökenden gelir, CORS problemi yoktur.
+
+  ADR-13 KURALLARI BURADA DA UYGULANIR:
+  - Hiçbir katman filtresiz istenmez: run_id daima, tahminlerde ayrıca abone.
+  - 500 geometri sınırı sunucuda; sayfa 400 yanıtını KULLANICIYA GÖSTERİR,
+    sessizce yutmaz. Kullanıcı neyi daraltacağını sunucunun açıklamasından
+    öğrenir.
+  - Harita hareketinde bbox süzgeci gönderilir.
+
+  GERÇEK KONUM KATMANI YOKTUR ve olmayacaktır (ADR-33/2): gateway
+  ground_truth'u göremez. Bu, kör testin (K6) sunum katmanına kadar
+  uzatılmasıdır.
+-->
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HTS-KGA — Konum Güven Alanı</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div id="sidebar">
+    <h1>HTS-KGA</h1>
+    <p class="sub">Konum Güven Alanı Analiz Platformu</p>
+
+    <section>
+      <label for="run">Koşu</label>
+      <select id="run"><option value="">yükleniyor…</option></select>
+      <div id="run-meta" class="meta"></div>
+    </section>
+
+    <section>
+      <h2>Katmanlar</h2>
+      <label class="chk"><input type="checkbox" id="l-cells"> Baz istasyonları</label>
+      <label class="chk"><input type="checkbox" id="l-activity"> Hücre yoğunluğu <span class="badge">k=5</span></label>
+      <label class="chk"><input type="checkbox" id="l-findings"> Bütünlük bulguları</label>
+      <div class="indent">
+        <select id="rule">
+          <option value="2">kural 2 — kinematik</option>
+          <option value="3">kural 3 — zaman</option>
+          <option value="5">kural 5 — cihaz</option>
+          <option value="1">kural 1 — envanter (konumsuz)</option>
+        </select>
+      </div>
+    </section>
+
+    <section>
+      <h2>Olasılık geometrileri</h2>
+      <p class="hint">ADR-13: tek abone zorunlu — koşu seçilince liste dolar</p>
+      <select id="subscriber"><option value="">— önce koşu seçin —</option></select>
+      <div id="subscriber-meta" class="meta"></div>
+      <label class="chk"><input type="checkbox" id="l-b0"> B0 — naif daire</label>
+      <label class="chk"><input type="checkbox" id="l-b1"> B1 — sektör dilimi</label>
+      <label class="chk"><input type="checkbox" id="l-m"> M@90 — olasılıksal</label>
+    </section>
+
+    <section>
+      <h2>Ölçümler</h2>
+      <div id="metrics" class="meta">koşu seçin</div>
+    </section>
+
+    <div id="status"></div>
+  </div>
+
+  <div id="map"></div>
+  <div id="popup" class="hidden"><button id="popup-close">×</button><pre id="popup-body"></pre></div>
+
+  <script src="/static/vendor/leaflet.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

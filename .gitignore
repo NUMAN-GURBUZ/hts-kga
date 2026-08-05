@@ -20,3 +20,6 @@ Thumbs.db
 
 # Docker geçici
 *.log
+
+# make up/down çalışma zamanı dosyaları
+.run/
